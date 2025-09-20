@@ -34,3 +34,31 @@ do
     end
   end)
 end
+
+do
+  local ps = { { 0, 0, 0 } }
+  for i = 1, 1000 do
+    local lp = ps[i]
+    local ox, oy, oz = math.random() - 0.5, math.random() - 0.5, math.random() - 0.5
+    ps[i + 1] = { lp[1] + ox, lp[2] + oy, lp[3] + oz }
+  end
+  test('p1000 x200 random', function()
+    for i = 1, 200 do
+      LineMesh.build(ps)
+    end
+  end)
+end
+
+do
+  local ps = { { 0, 0, 0 } }
+  for i = 1, 1000 do
+    local lp = ps[i]
+    local ox, oy, oz = math.random() - 0.5, math.random() * 0.5, math.random() - 0.5
+    ps[i + 1] = { lp[1] + ox, lp[2] + oy, lp[3] + oz }
+  end
+  test('p1000 x200 random forward', function()
+    for i = 1, 200 do
+      LineMesh.build(ps)
+    end
+  end)
+end
