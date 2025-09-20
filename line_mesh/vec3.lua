@@ -90,7 +90,7 @@ end
 function Vec3.normalize(a)
   local len = Vec3.length(a)
   if len == 0 then
-    a[1], a[2], a[3] = 0, 0, 0
+    a[1], a[2], a[3] = 1, 0, 0
   else
     Vec3.div(a, len, len, len)
   end

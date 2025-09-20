@@ -58,6 +58,15 @@ add_line({
   closed = true
 })
 
+add_line({
+  { 0.3, 0.2, 0.3 },
+  { 0.5, 0.2, 0.3 },
+  { 1.0, 0.2, 0.3 },
+  { 1.5, 0.2, 0.3 },
+}, 0.2, 8, {
+  colors = { { 1, 0, 0 }, { 0, 0, 1 } }
+})
+
 do
   add_line({
     { 1, 0.2, 0.5 },
@@ -130,7 +139,7 @@ vec4 lovrmain() {
 local function draw_debug_data(pass)
   for i, mesh_info in ipairs(Meshes) do
     for j, p in ipairs(mesh_info[2]) do
-      pass:sphere(p, 0.01)
+      pass:sphere(p, 0.001)
       pass:text(tostring(j), p + vec3(0, 0.1, 0), 0.05)
     end
   end

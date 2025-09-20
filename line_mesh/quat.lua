@@ -13,11 +13,11 @@ end
 
 local function QuatBetweenVec3(u, v)
   local dot = Vec3.dot(u, v)
-  if dot > 0.99999 then
+  if dot > 0.99999999 then
     return 0, 0, 0, 1
-  elseif dot < -0.99999 then
+  elseif dot < -0.99999999 then
     local axis = Vec3.cross({ 1, 0, 0 }, u)
-    if #axis < 0.00001 then axis = Vec3.cross({ 0, 1, 0 }, u) end
+    if Vec3.length(axis) < 0.00000001 then axis = Vec3.cross({ 0, 1, 0 }, u) end
     return FromAngleAxis(math.pi, axis[1], axis[2], axis[3])
   else
     local x, y, z =
@@ -74,6 +74,30 @@ function Quat.direction(q)
   local y = -2 * q[2] * q[3] + 2 * q[4] * q[1]
   local z = -1 + 2 * q[3] * q[1] + 2 * q[2] * q[2]
   return Vec3.raw_new(x, y, z)
+end
+
+function Quat.conjugate(q)
+  return new_quat(-q[1], -q[2], -q[3], q[4])
+end
+
+function Quat.clone(q)
+  return new_quat(q[1], q[2], q[3], q[4])
+end
+
+function Quat.length(q)
+  return (q[1] * q[1] + q[2] * q[2] + q[3] * q[3] + q[4] * q[4]) ^ .5
+end
+
+function Quat.to_angle_axis(q)
+  local x, y, z, w = q[1], q[2], q[3], q[4]
+  local length = q:length()
+  if length ~= 0 then
+    x, y, z, w = x / length, y / length, z / length, w / length
+  end
+
+  local s = math.sqrt(1 - w * w)
+  if s < .0001 then s = 1 else s = 1 / s end
+  return 2 * math.acos(w), x * s, y * s, z * s
 end
 
 local function quat_mul(a, b)
