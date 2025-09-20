@@ -16,14 +16,13 @@ NOTE: The current version has not been optimized, so generation should be relati
 
 **TODO**:
 
-* Make faster
 * Supports append point to path
 
 
 ## Use
 
 ```lua
-local points = { vec3(1, 0, 0), vec3(1, 1, 1), vec3(1, 0, 1) }
+local points = { { 1, 0, 0 }, { 1, 1, 1 }, { 1, 0, 1 } }
 local width = 0.1
 local seg = 8
 -- vlist: { { x, y, z, nx, ny, nz, u, v, r, g, b, a }, ... }
@@ -43,7 +42,7 @@ local vlist, ilist, len = LineMesh.build(points, wdtih, seg, {
 More see main.lua
 
 
-## Know issues
+## Known issues
 
 * When angles are too sharp (approaching overlap), the generated mesh may overlap.
 * When the distance between points is too close (less than the line radius) and the angle is relatively sharp, the generated mesh may overlap.
