@@ -1,8 +1,14 @@
 local LineMesh = require 'line_mesh'
 
+
+
 -- { { pass_fn_name, ...args }, ... }
 local debug_draws = {}
 local Meshes = {}
+
+LineMesh.debug_draw = function(...)
+  debug_draws[#debug_draws + 1] = { n = select('#', ...), ... }
+end
 
 local function add_line(points, radius, seg, opts)
   local nopts = { debug_draws = debug_draws }

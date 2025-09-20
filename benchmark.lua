@@ -42,8 +42,8 @@ do
     local ox, oy, oz = math.random() - 0.5, math.random() - 0.5, math.random() - 0.5
     ps[i + 1] = { lp[1] + ox, lp[2] + oy, lp[3] + oz }
   end
-  test('p1000 x200 random', function()
-    for i = 1, 200 do
+  test('p1000 x250 random', function()
+    for i = 1, 250 do
       LineMesh.build(ps)
     end
   end)
@@ -56,8 +56,8 @@ do
     local ox, oy, oz = math.random() - 0.5, math.random() * 0.5, math.random() - 0.5
     ps[i + 1] = { lp[1] + ox, lp[2] + oy, lp[3] + oz }
   end
-  test('p1000 x200 random forward', function()
-    for i = 1, 200 do
+  test('p1000 x250 random forward', function()
+    for i = 1, 250 do
       LineMesh.build(ps)
     end
   end)
