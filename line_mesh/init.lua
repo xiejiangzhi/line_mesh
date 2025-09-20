@@ -1,5 +1,31 @@
 local M = {}
 
+local _LVec3, LVec3, LQuat
+if lovr then
+  _LVec3 = Vec3
+  LVec3 = function(x, y, z)
+    if type(x) == 'table' then
+      return _LVec3(x[1], x[2], x[3])
+    else
+      return _LVec3(x, y, z)
+    end
+  end
+  LQuat = Quat
+end
+
+local mdir = (...):gsub("%.init$", '')
+local Vec3 = require(mdir..'.vec3')
+local Quat = require(mdir..'.quat')
+
+if lovr then
+  Vec3.to_lovr = function(v)
+    return _LVec3.raw_new(v[1], v[2], v[3])
+  end
+  Quat.to_lovr = function(q)
+    return LQuat.raw_new(q[1], q[2], q[3], q[4])
+  end
+end
+
 local EmptyFunc = function() end
 local DefaultOpts = {}
 local DefaultColor = { 1, 1, 1, 1 }
@@ -11,14 +37,19 @@ local DefaultColor = { 1, 1, 1, 1 }
 -- opts.smooth: optional, default is true.
 -- opts.debug_draws: optional, a table to output debug draws, { { pass_fn_name, ...args }, ... }
 -- return vlist{{ x, y, z, nx, ny, nz, u, v, r, g, b, a }, ...}, ilist, len
-function M.build(points, width, seg, opts)
-  assert(#points >= 2, 'points must >= 2')
+function M.build(_points, width, seg, opts)
+  assert(#_points >= 2, 'points must >= 2')
   width = width or 0.1
   assert(width > 0, 'width must > 0')
   seg = seg or 6
   assert(seg >= 3, 'segment must >= 3')
 
   opts = opts or DefaultOpts
+
+  local points = {}
+  for i, p in ipairs(_points) do
+    points[i] = Vec3.new(p)
+  end
 
   local vlist, ilist = {}, {}
   local len = 0
@@ -35,11 +66,12 @@ function M.build(points, width, seg, opts)
   for i = 1, seg do
     local phi = i / seg * math.pi * 2
     local x, y = math.sin(phi), math.cos(phi)
-    base_ps[#base_ps + 1] = vec3(x, y, 0)
+    base_ps[#base_ps + 1] = Vec3.raw_new(x, y, 0)
   end
 
   local gdata = {
     last_ps = {}, -- last point wrap points
+    last_dir = nil, last_rot = nil,
     poly_idx = {},
     last_poly_idx = {},
     smooth = opts.smooth ~= false,
@@ -51,7 +83,7 @@ function M.build(points, width, seg, opts)
   }
 
   local plen = 0
-  local pinfo = { radius = radius, plen = 0, color = nil }
+  local pinfo = { radius = width * 0.5, plen = 0, color = nil }
   for i = 1, #points do
     local p1 = points[i - 1]
     local p2 = points[i]
@@ -106,27 +138,27 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
 
   local dir_mid
   if math.abs(line_dot) > 0.9999 then
-    if math.abs(vec3(0, 1, 0):dot(line_dot)) > 0.1 then
-      dir_mid = dir21:cross(vec3(0, 1, 0))
+    if math.abs(dir21:dot(Vec3.raw_new(0, 1, 0))) > 0.1 then
+      dir_mid = Vec3.raw_new(0, 1, 0):cross(dir21)
     else
-      dir_mid = dir21:cross(vec3(1, 0, 0))
+      dir_mid = Vec3.raw_new(1, 0, 0):cross(dir21)
     end
   else
     dir_mid = (dir21 + dir23):normalize()
   end
 
-  local dir_v123 = vec3(dir21):cross(dir23)
-  local dir_mid_side = vec3(dir_v123):cross(dir_mid):normalize()
+  local dir_v123 = dir21:clone():cross(dir23)
+  local dir_mid_side = dir_v123:clone():cross(dir_mid):normalize()
 
   local angle = math.acos(line_dot)
   local inner_ov = pinfo.radius / math.sin(angle * 0.5)
-  local p_inner = p2 + dir_mid * inner_ov
 
-  gdata.add_debug_draw('setColor', 0.8, 0.8, 0)
-  gdata.add_debug_draw('line', Vec3(p2), Vec3(p2 + dir_mid_side * 0.3))
-  gdata.add_debug_draw('line', Vec3(p2), Vec3(p2 + dir_mid * 0.15))
-  gdata.add_debug_draw('sphere', Vec3(p_inner), 0.005)
-  gdata.add_debug_draw('setColor', 1, 1, 1)
+  -- local p_inner = p2 + dir_mid * inner_ov
+  -- gdata.add_debug_draw('setColor', 0.8, 0.8, 0)
+  -- gdata.add_debug_draw('line', LVec3(p2), LVec3(p2 + dir_mid_side * 0.3))
+  -- gdata.add_debug_draw('line', LVec3(p2), LVec3(p2 + dir_mid * 0.15))
+  -- gdata.add_debug_draw('sphere', LVec3(p_inner), 0.005)
+  -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
   if line_dot < -0.5 or not gdata.smooth then
     -- big angle, simple wrap point
@@ -135,42 +167,30 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
   else
     -- sharp angle, smoothing
-    -- local cut_ov = inner_ov * math.cos(angle * 0.5)
-    -- local cut_p12 = p2 + dir21 * cut_ov
-    -- local cut_p23 = p2 + dir23 * cut_ov
-    -- gdata.add_debug_draw('setColor', 1, 0, 0)
-    -- gdata.add_debug_draw('sphere', Vec3(p_inner), 0.005)
-    -- gdata.add_debug_draw('sphere', Vec3(cut_p12), 0.005)
-    -- gdata.add_debug_draw('sphere', Vec3(cut_p23), 0.005)
-    -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
-    local edge_dir21 = vec3(dir_v123):cross(-dir21):normalize()
-    local edge_dir23 = vec3(dir_v123):cross(dir23):normalize()
+    local edge_dir21 = dir_v123:clone():cross(-dir21):normalize()
+    local edge_dir23 = dir_v123:clone():cross(dir23):normalize()
 
     local p_edge21 = p2 + edge_dir21 * pinfo.radius
     local p_edge23 = p2 + edge_dir23 * pinfo.radius
     local cut_p = (p_edge21 + p_edge23) * 0.5
 
-    gdata.add_debug_draw('setColor', 0.5, 0.5, 0)
-    gdata.add_debug_draw('line', Vec3(p2), Vec3(p2 + vec3(dir_v123):cross(-dir21) * 0.5))
-    gdata.add_debug_draw('setColor', 0.5, 0, 0.5)
-    -- gdata.add_debug_draw('sphere', Vec3(p_edge21), 0.005)
-    -- gdata.add_debug_draw('sphere', Vec3(p_edge23), 0.005)
-    gdata.add_debug_draw('setColor', 1, 1, 0)
-    gdata.add_debug_draw('sphere', Vec3(cut_p), 0.005)
-    gdata.add_debug_draw('setColor', 1, 1, 1)
+    -- gdata.add_debug_draw('setColor', 0.5, 0.5, 0)
+    -- gdata.add_debug_draw('line', LVec3(p2), LVec3(p2 + Vec3(dir_v123):cross(-dir21) * 0.5))
+    -- gdata.add_debug_draw('setColor', 0.5, 0, 0.5)
+    -- gdata.add_debug_draw('setColor', 1, 1, 0)
+    -- gdata.add_debug_draw('sphere', LVec3(cut_p), 0.005)
+    -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
     M._wrap_point_on_plane(p2, -dir21, dir_mid_side, dir_mid, inner_ov, pinfo, vlist, gdata.poly_idx, gdata)
-    if not pinfo.close then
-      M._add_line_to_ilist(ilist, gdata.last_poly_idx, gdata.poly_idx)
-    end
+    M._add_line_to_ilist(ilist, gdata.last_poly_idx, gdata.poly_idx)
 
     local next_ps = {}
     local next_add_data = {}
     local fill_poly = {}
     local fill_poly_next = {}
     local fill_poly_next_start = nil
-    gdata.add_debug_draw('setColor', 0.3, 0.3, 0.3)
+    -- gdata.add_debug_draw('setColor', 0.3, 0.3, 0.3)
 
     local lcolor = pinfo.color
 
@@ -187,10 +207,10 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
         -- test poly(to prev point) intersection
         local prev_cut_p, len = M._ray_plane(p, (prev_p - p):normalize(), cut_p, dir_mid)
         if prev_cut_p and len < (prev_p - p):length() then
-          gdata.add_debug_draw('sphere', Vec3(prev_cut_p), 0.005)
-          local nx, ny, nz = M._calc_normal(prev_cut_p, p2, dir21):unpack()
+          -- gdata.add_debug_draw('sphere', LVec3(prev_cut_p), 0.005)
+          local nrm = M._calc_normal(prev_cut_p, p2, dir21)
           vlist[#vlist + 1] = {
-            prev_cut_p.x,  prev_cut_p.y,  prev_cut_p.z, nx, ny, nz,
+            prev_cut_p[1],  prev_cut_p[2],  prev_cut_p[3], nrm[1], nrm[2], nrm[3],
             pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
           }
           ilist[#ilist + 1] = #vlist
@@ -203,10 +223,10 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
         -- test poly(to next point) intersection
         local next_cut_p, len = M._ray_plane(p, (next_p - p):normalize(), cut_p, dir_mid)
         if next_cut_p and len < (next_p - p):length() then
-          gdata.add_debug_draw('sphere', Vec3(next_cut_p), 0.005)
-          local nx, ny, nz = M._calc_normal(next_cut_p, p2, dir23):unpack()
+          -- gdata.add_debug_draw('sphere', LVec3(next_cut_p), 0.005)
+          local nrm = M._calc_normal(next_cut_p, p2, dir23)
           vlist[#vlist + 1] = {
-            next_cut_p.x,  next_cut_p.y, next_cut_p.z, nx, ny, nz,
+            next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
             pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
           }
           ilist[#ilist + 1] = #vlist
@@ -217,29 +237,19 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
         end
 
         -- move poly point to plane, dir: p2 -> p1
-        local sp = M._ray_plane(p, dir21, cut_p, dir_mid)
+        local sp = M._ray_plane(p, dir21, cut_p, dir_mid) or p -- direct use p if point on plane,
         local v = vlist[gdata.poly_idx[i]]
-        if sp then
-          v[1], v[2], v[3] = sp:unpack()
-          fill_poly[#fill_poly + 1] = sp
-        else
-          -- Theoretically, execution will not reach this point.
-          error("Not find intersection")
-        end
+        v[1], v[2], v[3] = sp[1], sp[2], sp[3]
+        fill_poly[#fill_poly + 1] = sp
 
         -- move poly point to plane, dir: p2 -> p3
-        local np = M._ray_plane(p, dir23, cut_p, dir_mid)
-        if np then
-          next_ps[#next_ps + 1] = np
-          fill_poly_next[#fill_poly_next + 1] = np
-        else
-          -- Theoretically, execution will not reach this point.
-          error("Not find intersection")
-        end
+        local np = M._ray_plane(p, dir23, cut_p, dir_mid) or p
+        next_ps[#next_ps + 1] = np
+        fill_poly_next[#fill_poly_next + 1] = np
 
-        gdata.add_debug_draw('setColor', 0.3, 0.3, 0.3)
-        gdata.add_debug_draw('line', Vec3(p), Vec3(sp))
-        gdata.add_debug_draw('line', Vec3(p), Vec3(np))
+        -- gdata.add_debug_draw('setColor', 0.3, 0.3, 0.3)
+        -- gdata.add_debug_draw('line', LVec3(p), LVec3(sp))
+        -- gdata.add_debug_draw('line', LVec3(p), LVec3(np))
       else
         next_ps[#next_ps + 1] = p
         if dv <= 1e-6 then
@@ -247,7 +257,7 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
         end
       end
     end
-    gdata.add_debug_draw('setColor', 1, 1, 1)
+    -- gdata.add_debug_draw('setColor', 1, 1, 1)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
 
     fill_poly[#fill_poly + 1] = fill_poly_next_start
@@ -260,13 +270,11 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
     end
 
     -- copy smmoth  vertex for p2 to p3
-    next_ps.dir = gdata.last_ps.dir
-    next_ps.rot = gdata.last_ps.rot
     gdata.last_ps = next_ps
     for i, p in ipairs(next_ps) do
-      local nx, ny, nz = M._calc_normal(p, p3, dir23):unpack()
+      local nrm = M._calc_normal(p, p3, dir23)
       vlist[#vlist + 1] = {
-        p.x, p.y, p.z, nx, ny, nz,
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
         pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
       }
       gdata.poly_idx[i] = #vlist
@@ -283,28 +291,28 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
     local poly2_idx = {}
     local poly2_dist = (line_dot + 0.5) / 3
     for i, p in ipairs(fill_poly) do
-      local l = i / #fill_poly
-      gdata.add_debug_draw('setColor', 0.1, 0.1, l)
-      gdata.add_debug_draw('sphere', Vec3(p), 0.005)
+      -- local l = i / #fill_poly
+      -- gdata.add_debug_draw('setColor', 0.1, 0.1, l)
+      -- gdata.add_debug_draw('sphere', LVec3(p), 0.005)
 
-      local nx, ny, nz = M._calc_normal(p, p3, dir23):unpack()
+      local nrm = M._calc_normal(p, p3, dir23)
       vlist[#vlist + 1] = {
-        p.x, p.y, p.z, nx, ny, nz,
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
         pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
       }
       poly_idx[#poly_idx + 1] = #vlist
 
       if poly2_dist > 0.01 then
-        local sp = cut_p + (p - cut_p) * 0.5 - dir_mid * pinfo.radius * poly2_dist
-        nx, ny, nz = (sp - cut_p):normalize():unpack()
+        local sp = cut_p + (p - cut_p) * 0.5 - dir_mid * (pinfo.radius * poly2_dist)
+        nrm = (sp - cut_p):normalize()
         vlist[#vlist + 1] = {
-          sp.x, sp.y, sp.z, nx, ny, nz,
+          sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
           pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
         }
         poly2_idx[#poly2_idx + 1] = #vlist
       end
     end
-    gdata.add_debug_draw('setColor', 1, 1, 1)
+    -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
     if #poly2_idx > 0 then
       M._add_line_to_ilist(ilist, poly2_idx, poly_idx)
@@ -327,9 +335,9 @@ function M._gen_2p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
 
   if p1 then
     local dir = (p2 - p1):normalize()
-    gdata.add_debug_draw('setColor', 1, 1, 0)
-    gdata.add_debug_draw('line', Vec3(p2), Vec3(p2 + dir * 0.5))
-    gdata.add_debug_draw('setColor', 1, 1, 1)
+    -- gdata.add_debug_draw('setColor', 1, 1, 0)
+    -- gdata.add_debug_draw('line', LVec3(p2), LVec3(p2 + dir * 0.5))
+    -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
     M._wrap_point(p2, dir, pinfo, vlist, gdata.poly_idx, gdata)
     M._add_line_to_ilist(ilist, gdata.last_poly_idx, gdata.poly_idx)
@@ -341,9 +349,9 @@ function M._gen_2p_data(pidx, p1, p2, p3, pinfo, vlist, ilist, gdata)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
   else
     local dir = (p3 - p2):normalize()
-    gdata.add_debug_draw('setColor', 1, 1, 0)
-    gdata.add_debug_draw('line', Vec3(p2), Vec3(p2 + dir * 0.5))
-    gdata.add_debug_draw('setColor', 1, 1, 1)
+    -- gdata.add_debug_draw('setColor', 1, 1, 0)
+    -- gdata.add_debug_draw('line', LVec3(p2), LVec3(p2 + dir * 0.5))
+    -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
     M._wrap_point(p2 - dir * pinfo.radius * 0.5, dir, spinfo, vlist, gdata.poly_idx, gdata)
     M._add_poly_to_ilist(ilist, gdata.poly_idx, pidx > 1)
@@ -357,30 +365,29 @@ end
 
 function M._wrap_point(point, dir, pinfo, out_vs, out_poly_idx, gdata)
   local last_ps = gdata.last_ps
-  local last_dir = last_ps.dir
-  last_ps.dir = dir
+  local last_dir = gdata.last_dir
 
-  local rot = last_dir and (quat(last_dir, dir) * last_ps.rot) or quat(dir)
-  last_ps.rot = rot
+  local rot = last_dir and (Quat.new(last_dir, dir) * gdata.last_rot) or Quat.new(dir)
+  gdata.last_rot = rot
+  gdata.last_dir = dir
   local color = pinfo.color
 
   for i = 1, gdata.seg do
     local lp = point + rot * gdata.base_ps[i] * pinfo.radius
     last_ps[i] = lp
 
-    local l = i / gdata.seg
-    gdata.add_debug_draw('setColor', l, l, l)
-    gdata.add_debug_draw('sphere', Vec3(lp), 0.005)
+    -- local l = i / gdata.seg
+    -- gdata.add_debug_draw('setColor', l, l, l)
+    -- gdata.add_debug_draw('sphere', LVec3(lp), 0.005)
 
-    local x, y, z = lp:unpack()
-    local nx, ny, nz = M._calc_normal(lp, point, dir):unpack()
+    local nrm = M._calc_normal(lp, point, dir)
     out_vs[#out_vs + 1] = {
-      x, y, z, nx, ny, nz,
+      lp[1], lp[2], lp[3], nrm[1], nrm[2], nrm[3],
       pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
     }
     out_poly_idx[i] = #out_vs
   end
-  gdata.add_debug_draw('setColor', 1, 1, 1)
+  -- gdata.add_debug_draw('setColor', 1, 1, 1)
   out_poly_idx[gdata.seg + 1] = nil
 end
 
@@ -390,35 +397,35 @@ function M._wrap_point_on_plane(
   point, dir_src, plane_dir, dir_mid, inner_ov, pinfo, out_vs, out_poly_idx, gdata
 )
   local last_ps = gdata.last_ps
-  local last_dir = last_ps.dir
-  local rot = last_dir and (quat(last_dir, plane_dir) * last_ps.rot) or quat(plane_dir)
-  last_ps.dir = plane_dir
-  last_ps.rot = rot
+  local last_dir = gdata.last_dir
+  local rot = last_dir and (Quat.new(last_dir, plane_dir) * gdata.last_rot) or Quat.new(plane_dir)
+  gdata.last_dir = plane_dir
+  gdata.last_rot = rot
   local color = pinfo.color
   local s = inner_ov / pinfo.radius - 1
 
   -- gdata.add_debug_draw('setColor', 0, 1, 1)
-  -- gdata.add_debug_draw('line', Vec3(point), Vec3(point + rot:direction()))
+  -- gdata.add_debug_draw('line', LVec3(point), LVec3(point + rot:direction()))
   -- gdata.add_debug_draw('setColor', 1, 1, 1)
 
   for i = 1, gdata.seg do
-    local bp = rot * gdata.base_ps[i] * pinfo.radius
-    bp = bp + dir_mid * (dir_mid:dot(bp) * s)
+    local bp = rot * (gdata.base_ps[i] * pinfo.radius)
+    bp:add(dir_mid * (dir_mid:dot(bp) * s))
     local p = point + bp
 
-    local l = i / gdata.seg
-    gdata.add_debug_draw('setColor', l, l, l)
-    gdata.add_debug_draw('sphere', Vec3(p), 0.005)
+    -- local l = i / gdata.seg
+    -- gdata.add_debug_draw('setColor', l, l, l)
+    -- gdata.add_debug_draw('sphere', LVec3(p), 0.005)
 
     if last_ps[i] then
-      last_ps[i]:set(p)
+      last_ps[i] = p
     else
       last_ps[i] = p
     end
-    local x, y, z = p:unpack()
-    local nx, ny, nz = M._calc_normal(p, point, dir_src):unpack()
+    local nrm = M._calc_normal(p, point, dir_src)
     out_vs[#out_vs + 1] = {
-      x, y, z, nx, ny, nz, pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
+      p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+      pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
     }
     out_poly_idx[i] = #out_vs
   end
@@ -474,7 +481,7 @@ end
 
 function M._calc_normal(p, line_p, line_dir)
   local vp = line_p + line_dir * line_dir:dot(p - line_p)
-  return (p - vp):normalize(), vp
+  return (p - vp):normalize()
 end
 
 return M

@@ -19,6 +19,11 @@ local function add_line(points, radius, seg, opts)
   local cost = (os.clock() - st) * 1000
   print(string.format('add line, points: %i, cost: %.4f ms', #points, cost))
 
+  local debug_line = {}
+  for i, p in ipairs(points) do
+    debug_line[i] = Vec3(p[1], p[2], p[3])
+  end
+
   if ok then
     local mesh = lovr.graphics.newMesh({
       { name = 'VertexPosition', type = 'vec3' },
@@ -28,37 +33,37 @@ local function add_line(points, radius, seg, opts)
     }, #vlist)
     mesh:setVertices(vlist)
     mesh:setIndices(ilist)
-    Meshes[#Meshes + 1] = { mesh, points }
+    Meshes[#Meshes + 1] = { mesh, debug_line }
   else
-    Meshes[#Meshes + 1] = { nil, points }
+    Meshes[#Meshes + 1] = { nil, debug_line }
   end
 end
 
 add_line({
-  Vec3(0.2, 0.2, 0),
-  Vec3(1, 1, -1),
+  { 0.2, 0.2, 0 },
+  { 1, 1, -1 },
 }, 0.2, 8, {
   colors = { { 1, 0, 0 }, { 0, 0, 1 } }
 })
 
 add_line({
-  Vec3(1, 0.2, 0),
-  Vec3(2, 0.2, 0),
-  Vec3(2, 2, 0),
-  Vec3(2, 2, 2),
-  Vec3(2, 2.5, 0),
-  Vec3(1.9, 2.5, 2),
-  -- Vec3(1.899, 2.5, 1.9), -- bad point
+  { 1, 0.2, 0 },
+  { 2, 0.2, 0 },
+  { 2, 2, 0 },
+  { 2, 2, 2 },
+  { 2, 2.5, 0 },
+  { 1.9, 2.5, 2 },
+  -- { 1.899, 2.5, 1.9 }, -- bad point
 }, nil, 6, {
   closed = true
 })
 
 do
   add_line({
-    Vec3(1, 0.2, 0.5),
-    Vec3(1.5, 0.2, 1),
-    Vec3(1, .2, 1.5),
-    Vec3(0.5, .2, 1),
+    { 1, 0.2, 0.5 },
+    { 1.5, 0.2, 1 },
+    { 1, .2, 1.5 },
+    { 0.5, .2, 1 },
   }, nil, 8, {
     closed = true
   })
@@ -67,16 +72,16 @@ do
   for i = 1, 32 do
     local phi = i / 32 * math.pi * 2
     local x, y = math.cos(phi) * 0.25, math.sin(phi) * 0.25
-    ps[#ps + 1] = Vec3(1 + x, 0.2, 1 + y)
+    ps[#ps + 1] = { 1 + x, 0.2, 1 + y }
   end
   add_line(ps, 0.05, 8, { closed = true })
 
   local s = 0.1
   add_line({
-    Vec3(1, 0.2, 1 - s),
-    Vec3(1 + s, 0.2, 1),
-    Vec3(1, .2, 1 + s),
-    Vec3(1 - s, .2, 1),
+    { 1, 0.2, 1 - s },
+    { 1 + s, 0.2, 1 },
+    { 1, .2, 1 + s },
+    { 1 - s, .2, 1 },
   }, 0.05, 8, {
     closed = true
   })
@@ -84,23 +89,23 @@ end
 
 do
   local ps = {}
-  for i = 0, 100 do
-    local z = i * 0.05
-    ps[#ps + 1] = Vec3(
+  for i = 0, 200 do
+    local z = i * 0.03
+    ps[#ps + 1] = {
       -0.5 + math.sin(z * math.pi * 3) * 0.5,
-      0.2 + (i >= 50 and ((i - 50) * 0.05) or 0),
-      1 + -z
-    )
+      0.2 + (i >= 100 and ((i - 100) * 0.01) or 0),
+      1 + -z + (i >= 100 and ((i - 100) * 0.05) or 0)
+    }
   end
   add_line(ps)
 end
 
 do
   add_line({
-    Vec3(0, 0.2, 2),
-    Vec3(1, 0.7, 2),
-    Vec3(2, 0.3, 2),
-    Vec3(3, 0.5, 2),
+    { 0, 0.2, 2 },
+    { 1, 0.7, 2 },
+    { 2, 0.3, 2 },
+    { 3, 0.5, 2 },
   }, nil, 10, {
     colors = { { 1, 0, 0 }, { 0, 1, 0 }, { 0, 0, 1 }, { 1, 1, 1 } },
     widths = { 0.05, 0.2, 0.02, 0.5 }
@@ -117,7 +122,7 @@ vec4 lovrmain() {
   vec4 col = DefaultColor;
   col.rgb *= UV.x * Normal;
   col.rgb = vec3(sin(UV.x * 100.) * 0.5 + 0.5, sin(UV.y * 10) * 0.5 + 0.5, 0.5);
-  // col.rgb = Normal;
+  // col = vec4(Normal, 1);
   return col;
 }
 ]])
@@ -155,7 +160,7 @@ function lovr.draw(pass)
     pass:line(mesh_info[2])
   end
 
-  -- draw_debug_data(pass)
+  draw_debug_data(pass)
 
   for x = -10, 10, 0.5 do
     for y = -10, 10, 0.5 do
