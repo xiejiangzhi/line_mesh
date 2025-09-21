@@ -28,9 +28,25 @@ if lovr then
   end
 end
 
+local ok, ffi = pcall(require, 'ffi')
+
+local LineMeshOutputVertex
+if ffi then
+  ffi.cdef[[
+    typedef struct {
+      float x, y, z;
+      float nx, ny, nz;
+      float u, v;
+      float r, g, b, a;
+    } LineMeshOutputVertex;
+  ]]
+  LineMeshOutputVertex = ffi.typeof('LineMeshOutputVertex')
+end
+
 -- debug_draw(pass_fn_name, ...args)
 M.debug_draw = function(pass_fn_name, ...) end
 
+local DefaultSeg = 5
 local DefaultOpts = {}
 local DefaultColor = { 1, 1, 1, 1 }
 
@@ -38,13 +54,15 @@ local DefaultColor = { 1, 1, 1, 1 }
 -- opts.colors: { { r, g, b, a or 1 }, ... }, points colors, 1-1 map
 -- opts.widths: { w1, w2, w3, ... }, points widths, 1-1 map
 -- opts.closed: bool, link first point & last point. TODO impl
+-- opts.output_type: optional, table or cdata, default is table. cdata pre vertex has 12 float numbers
 -- opts.smooth: optional, default is true.
--- return vlist{{ x, y, z, nx, ny, nz, u, v, r, g, b, a }, ...}, ilist, len
+-- return vlist{{ x, y, z, nx, ny, nz, u, v, r, g, b, a }, ...}, ilist, line_len, vtotal, itotal
+-- return vlist_float[vtotal*12], ilist_int[itotal], line_len, vtotal, itotal
 function M.build(_points, width, seg, opts)
   assert(#_points >= 2, 'points must >= 2')
   width = width or 0.1
   assert(width > 0, 'width must > 0')
-  seg = seg or 6
+  seg = seg or DefaultSeg
   assert(seg >= 3, 'segment must >= 3')
 
   opts = opts or DefaultOpts
@@ -54,10 +72,19 @@ function M.build(_points, width, seg, opts)
     points[i] = Vec3.new(p)
   end
 
-  local vlist, ilist = {}, {}
-  local len = 0
+  local vlist, ilist, next_vi, next_ii
+  if opts.output_type == 'cdata' then
+    local tv, ti = M.predirect_output_size(points, seg)
+    vlist = ffi.new('LineMeshOutputVertex[?]', tv)
+    ilist = ffi.new('uint32_t[?]', ti)
+    next_vi, next_ii = 0, 0
+  else
+    vlist, ilist = {}, {}
+    next_vi, next_ii = 1, 1
+  end
+  local line_len = 0
   for i = 2, #points do
-    len = len + points[i]:distance(points[i - 1])
+    line_len = line_len + points[i]:distance(points[i - 1])
   end
 
   local colors = opts.colors
@@ -81,8 +108,9 @@ function M.build(_points, width, seg, opts)
     smooth = opts.smooth ~= false,
     seg = seg,
 
-    vlist = vlist,
-    ilist = ilist
+    output_type = opts.output_type,
+    vlist = vlist, next_vi = next_vi,
+    ilist = ilist, next_ii = next_ii,
   }
 
   local plen = 0
@@ -106,7 +134,7 @@ function M.build(_points, width, seg, opts)
     end
     pinfo.idx = i
     pinfo.radius = (widths and widths[i] or width) * 0.5
-    pinfo.plen = plen / len
+    pinfo.plen = plen / line_len
     pinfo.color = colors and colors[i] or DefaultColor
 
     if p1 and p3 then
@@ -121,10 +149,53 @@ function M.build(_points, width, seg, opts)
     for i = 1, seg do
       first_poly_idx[#first_poly_idx + 1] = i
     end
-    M._add_line_to_ilist(ilist, gdata.last_poly_idx, first_poly_idx)
+    M._add_line_to_ilist(gdata, gdata.last_poly_idx, first_poly_idx)
   end
 
-  return vlist, ilist, len
+
+  local vtotal, itotal
+  if gdata.output_type == 'cdata' then
+    vtotal, itotal = gdata.next_vi, gdata.next_ii
+  else
+    vtotal, itotal = gdata.next_vi - 1, gdata.next_ii - 1
+  end
+
+  return vlist, ilist, line_len, vtotal, itotal
+end
+
+-- The predicted result >= the final output size
+-- return total_vertices, total_indexes
+function M.predirect_output_size(points, seg)
+  seg = seg or DefaultSeg
+  local tv = 0
+  local ti = 0
+  for i, p2 in ipairs(points) do
+    if i == 1 then
+      tv = tv + seg * 2
+      -- poly + smooth line
+      ti = ti + (seg - 2) * 3 + seg * 6
+    elseif i == #points then
+      tv = tv + seg * 2
+      -- prev line + smooth line + poly
+      ti = ti + (seg - 2) * 3 + seg * 6 * 2
+    else
+      local p1 = points[i - 1]
+      local p3 = points[i + 1]
+      local dir21 = Vec3.normalize({ p1[1] - p2[1], p1[2] - p2[2], p1[3] - p2[3] })
+      local dir23 = Vec3.normalize({ p3[1] - p2[1], p3[2] - p2[2], p3[3] - p2[2] })
+      local line_dot = Vec3.dot(dir21, dir23)
+
+      if line_dot < -0.5 then
+        tv = tv + seg
+        ti = ti + seg * 6
+      else
+        tv = tv + seg * 5
+        -- prev line + cut 4tri + fill line + fill poly
+        ti = ti + seg * 6 + 12 + (seg + 4) * 6 + (seg + 2) * 3
+      end
+    end
+  end
+  return tv, ti
 end
 
 ------------------------
@@ -170,14 +241,14 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, gdata)
 
   if line_dot < -0.5 or not gdata.smooth then
     -- big angle, simple wrap point
-    M._wrap_point_on_plane(p2, dir12, dir_mid_side, dir_mid, inner_ov, pinfo, gdata.vlist, gdata.poly_idx, gdata)
-    M._add_line_to_ilist(gdata.ilist, gdata.last_poly_idx, gdata.poly_idx)
+    M._wrap_point_on_plane(p2, dir12, dir_mid_side, dir_mid, inner_ov, pinfo, gdata.poly_idx, gdata)
+    M._add_line_to_ilist(gdata, gdata.last_poly_idx, gdata.poly_idx)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
   else
     -- sharp angle, smoothing
 
-    M._wrap_point_on_plane(p2, dir12, dir_mid_side, dir_mid, inner_ov, pinfo, gdata.vlist, gdata.poly_idx, gdata)
-    M._add_line_to_ilist(gdata.ilist, gdata.last_poly_idx, gdata.poly_idx)
+    M._wrap_point_on_plane(p2, dir12, dir_mid_side, dir_mid, inner_ov, pinfo, gdata.poly_idx, gdata)
+    M._add_line_to_ilist(gdata, gdata.last_poly_idx, gdata.poly_idx)
 
     M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot, gdata)
   end
@@ -192,7 +263,6 @@ function M._gen_2p_data(pidx, p1, p2, p3, pinfo, gdata)
   -- local dir = p1 and (p2 - p1):normalize() or (p3 - p2):normalize()
 
   local spinfo = { radius = pinfo.radius * 0.5, plen = pinfo.plen, color = pinfo.color }
-  local vlist, ilist = gdata.vlist, gdata.ilist
 
   if p1 then
     local dir = (p2 - p1):normalize()
@@ -200,13 +270,13 @@ function M._gen_2p_data(pidx, p1, p2, p3, pinfo, gdata)
     -- M.debug_draw('line', LVec3(p2), LVec3(p2 + dir * 0.5))
     -- M.debug_draw('setColor', 1, 1, 1)
 
-    M._wrap_point(p2, dir, pinfo, vlist, gdata.poly_idx, gdata)
-    M._add_line_to_ilist(ilist, gdata.last_poly_idx, gdata.poly_idx)
+    M._wrap_point(p2, dir, pinfo, gdata.poly_idx, gdata)
+    M._add_line_to_ilist(gdata, gdata.last_poly_idx, gdata.poly_idx)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
 
-    M._wrap_point(p2 + dir * pinfo.radius * 0.5, dir, spinfo, vlist, gdata.poly_idx, gdata)
-    M._add_poly_to_ilist(ilist, gdata.poly_idx, pidx > 1)
-    M._add_line_to_ilist(ilist, gdata.last_poly_idx, gdata.poly_idx)
+    M._wrap_point(p2 + dir * pinfo.radius * 0.5, dir, spinfo, gdata.poly_idx, gdata)
+    M._add_poly_to_ilist(gdata, gdata.poly_idx, pidx > 1)
+    M._add_line_to_ilist(gdata, gdata.last_poly_idx, gdata.poly_idx)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
   else
     local dir = (p3 - p2):normalize()
@@ -214,17 +284,17 @@ function M._gen_2p_data(pidx, p1, p2, p3, pinfo, gdata)
     -- M.debug_draw('line', LVec3(p2), LVec3(p2 + dir * 0.5))
     -- M.debug_draw('setColor', 1, 1, 1)
 
-    M._wrap_point(p2 - dir * pinfo.radius * 0.5, dir, spinfo, vlist, gdata.poly_idx, gdata)
-    M._add_poly_to_ilist(ilist, gdata.poly_idx, pidx > 1)
+    M._wrap_point(p2 - dir * pinfo.radius * 0.5, dir, spinfo, gdata.poly_idx, gdata)
+    M._add_poly_to_ilist(gdata, gdata.poly_idx, pidx > 1)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
 
-    M._wrap_point(p2, dir, pinfo, vlist, gdata.poly_idx, gdata)
-    M._add_line_to_ilist(ilist, gdata.last_poly_idx, gdata.poly_idx)
+    M._wrap_point(p2, dir, pinfo, gdata.poly_idx, gdata)
+    M._add_line_to_ilist(gdata, gdata.last_poly_idx, gdata.poly_idx)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
   end
 end
 
-function M._wrap_point(point, dir, pinfo, out_vs, out_poly_idx, gdata)
+function M._wrap_point(point, dir, pinfo, out_poly_idx, gdata)
   local last_ps = gdata.last_ps
   local last_dir = gdata.last_dir
 
@@ -233,6 +303,7 @@ function M._wrap_point(point, dir, pinfo, out_vs, out_poly_idx, gdata)
   gdata.last_dir = dir
   local color = pinfo.color
 
+  local vlist, next_vi = gdata.vlist, gdata.next_vi
   for i = 1, gdata.seg do
     local lp = point + rot * gdata.base_ps[i] * pinfo.radius
     last_ps[i] = lp
@@ -242,12 +313,22 @@ function M._wrap_point(point, dir, pinfo, out_vs, out_poly_idx, gdata)
     -- M.debug_draw('sphere', LVec3(lp), 0.005)
 
     local nrm = M._calc_normal(lp, point, dir)
-    out_vs[#out_vs + 1] = {
-      lp[1], lp[2], lp[3], nrm[1], nrm[2], nrm[3],
-      pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
-    }
-    out_poly_idx[i] = #out_vs
+    -- if type(vlist) == 'table' then
+    if gdata.output_type == 'cdata' then
+      vlist[next_vi] = LineMeshOutputVertex(
+        lp[1], lp[2], lp[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
+      )
+    else
+      vlist[next_vi] = {
+        lp[1], lp[2], lp[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
+      }
+    end
+    out_poly_idx[i] = next_vi
+    next_vi = next_vi + 1
   end
+  gdata.next_vi = next_vi
   -- M.debug_draw('setColor', 1, 1, 1)
   out_poly_idx[gdata.seg + 1] = nil
 end
@@ -255,7 +336,7 @@ end
 -- point
 -- dir_src: direction from prev point to point
 function M._wrap_point_on_plane(
-  point, dir_src, plane_dir, dir_mid, inner_ov, pinfo, out_vs, out_poly_idx, gdata
+  point, dir_src, plane_dir, dir_mid, inner_ov, pinfo, out_poly_idx, gdata
 )
   local last_ps = gdata.last_ps
   local last_dir = gdata.last_dir
@@ -266,6 +347,7 @@ function M._wrap_point_on_plane(
   local color = pinfo.color
   local s = inner_ov / pinfo.radius - 1
 
+  local vlist, next_vi = gdata.vlist, gdata.next_vi
   for i = 1, gdata.seg do
     local bp = rot * (gdata.base_ps[i] * pinfo.radius)
     bp:add(dir_mid * (dir_mid:dot(bp) * s))
@@ -281,17 +363,27 @@ function M._wrap_point_on_plane(
       last_ps[i] = p
     end
     local nrm = M._calc_normal(p, point, dir_src)
-    out_vs[#out_vs + 1] = {
-      p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
-      pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
-    }
-    out_poly_idx[i] = #out_vs
+    if gdata.output_type == 'cdata' then
+      vlist[next_vi] = LineMeshOutputVertex(
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
+      )
+    else
+      vlist[next_vi] = {
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
+      }
+    end
+    out_poly_idx[i] = next_vi
+    next_vi = next_vi + 1
   end
+  gdata.next_vi = next_vi
   out_poly_idx[gdata.seg + 1] = nil
 end
 
 function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot, gdata)
-  local vlist, ilist = gdata.vlist, gdata.ilist
+  -- NOTE don't mod gdata.next_xx before sync
+  local vlist, ilist, next_vi, next_ii = gdata.vlist, gdata.ilist, gdata.next_vi, gdata.next_ii
 
   -- M.debug_draw('setColor', 0.5, 0.5, 0)
   -- M.debug_draw('line', LVec3(p2), LVec3(p2 + Vec3(dir_v123):cross(dir12) * 0.5))
@@ -326,14 +418,23 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       if prev_cut_p and len < prev_p:distance(p) then
         -- M.debug_draw('sphere', LVec3(prev_cut_p), 0.005)
         local nrm = M._calc_normal(prev_cut_p, p2, dir21)
-        vlist[#vlist + 1] = {
-          prev_cut_p[1],  prev_cut_p[2],  prev_cut_p[3], nrm[1], nrm[2], nrm[3],
-          pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
-        }
-        ilist[#ilist + 1] = #vlist
-        ilist[#ilist + 1] = gdata.poly_idx[prev_i]
-        ilist[#ilist + 1] = gdata.poly_idx[i]
-        next_add_data[#next_add_data + 1] = { #vlist, prev_i, i }
+        if gdata.output_type == 'cdata' then
+          vlist[next_vi] = LineMeshOutputVertex(
+            prev_cut_p[1],  prev_cut_p[2],  prev_cut_p[3], nrm[1], nrm[2], nrm[3],
+            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          )
+        else
+          vlist[next_vi] = {
+            prev_cut_p[1],  prev_cut_p[2],  prev_cut_p[3], nrm[1], nrm[2], nrm[3],
+            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          }
+        end
+        ilist[next_ii] = next_vi
+        ilist[next_ii + 1] = gdata.poly_idx[prev_i]
+        ilist[next_ii + 2] = gdata.poly_idx[i]
+        next_ii = next_ii + 3
+        next_add_data[#next_add_data + 1] = { next_vi, prev_i, i }
+        next_vi = next_vi + 1
         fill_poly[#fill_poly + 1] = prev_cut_p
       end
 
@@ -342,21 +443,34 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       if next_cut_p and len < next_p:distance(p) then
         -- M.debug_draw('sphere', LVec3(next_cut_p), 0.005)
         local nrm = M._calc_normal(next_cut_p, p2, dir23)
-        vlist[#vlist + 1] = {
-          next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
-          pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
-        }
-        ilist[#ilist + 1] = #vlist
-        ilist[#ilist + 1] = gdata.poly_idx[i]
-        ilist[#ilist + 1] = gdata.poly_idx[next_i]
-        next_add_data[#next_add_data + 1] = { #vlist, i, next_i }
+        if gdata.output_type == 'cdata' then
+          vlist[next_vi] = LineMeshOutputVertex(
+            next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
+            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          )
+        else
+          vlist[next_vi] = {
+            next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
+            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          }
+        end
+        ilist[next_ii] = next_vi
+        ilist[next_ii + 1] = gdata.poly_idx[i]
+        ilist[next_ii + 2] = gdata.poly_idx[next_i]
+        next_ii = next_ii + 3
+        next_add_data[#next_add_data + 1] = { next_vi, i, next_i }
+        next_vi = next_vi + 1
         fill_poly_next_start = next_cut_p
       end
 
       -- move poly point to plane, dir: p2 -> p1
       local sp = M._ray_plane(p, dir21, cut_p, dir_mid) or p -- direct use p if point on plane,
       local v = vlist[gdata.poly_idx[i]]
-      v[1], v[2], v[3] = sp[1], sp[2], sp[3]
+      if gdata.output_type == 'cdata' then
+        v.x, v.y, v.z = sp[1], sp[2], sp[3]
+      else
+        v[1], v[2], v[3] = sp[1], sp[2], sp[3]
+      end
       fill_poly[#fill_poly + 1] = sp
 
       -- move poly point to plane, dir: p2 -> p3
@@ -390,16 +504,25 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
   gdata.last_ps = next_ps
   for i, p in ipairs(next_ps) do
     local nrm = M._calc_normal(p, p3, dir23)
-    vlist[#vlist + 1] = {
-      p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
-      pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
-    }
-    gdata.poly_idx[i] = #vlist
+    if gdata.output_type == 'cdata' then
+      vlist[next_vi] = LineMeshOutputVertex(
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+      )
+    else
+      vlist[next_vi] = {
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+      }
+    end
+    gdata.poly_idx[i] = next_vi
+    next_vi = next_vi + 1
   end
   for i, info in ipairs(next_add_data) do
-    ilist[#ilist + 1] = info[1]
-    ilist[#ilist + 1] = gdata.poly_idx[info[3]]
-    ilist[#ilist + 1] = gdata.poly_idx[info[2]]
+    ilist[next_ii] = info[1]
+    ilist[next_ii + 1] = gdata.poly_idx[info[3]]
+    ilist[next_ii + 2] = gdata.poly_idx[info[2]]
+    next_ii = next_ii + 3
   end
   gdata.poly_idx[gdata.seg + 1] = nil
   gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
@@ -414,60 +537,83 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
     -- M.debug_draw('sphere', LVec3(p), 0.005)
 
     local nrm = M._calc_normal(p, p3, dir23)
-    vlist[#vlist + 1] = {
-      p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
-      pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
-    }
-    poly_idx[#poly_idx + 1] = #vlist
+    if gdata.output_type == 'cdata' then
+      vlist[next_vi] = LineMeshOutputVertex(
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+      )
+    else
+      vlist[next_vi] = {
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
+        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+      }
+    end
+    poly_idx[#poly_idx + 1] = next_vi
+    next_vi = next_vi + 1
 
     if poly2_dist > 0.01 then
       local sp = cut_p + (p - cut_p) * 0.5 - dir_mid * (pinfo.radius * 0.4 * poly2_dist)
       -- M.debug_draw('setColor', l, 0.1, 0.1)
       -- M.debug_draw('sphere', LVec3(sp), 0.005)
       nrm = (sp - p2):normalize()
-      vlist[#vlist + 1] = {
-        sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
-        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
-      }
-      poly2_idx[#poly2_idx + 1] = #vlist
+      if gdata.output_type == 'cdata' then
+        vlist[next_vi] = LineMeshOutputVertex(
+          sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
+          pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+        )
+      else
+        vlist[next_vi] = {
+          sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
+          pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+        }
+      end
+      poly2_idx[#poly2_idx + 1] = next_vi
+      next_vi = next_vi + 1
     end
   end
   -- M.debug_draw('setColor', 1, 1, 1)
+  gdata.next_vi, gdata.next_ii = next_vi, next_ii
 
   if #poly2_idx > 0 then
-    M._add_line_to_ilist(ilist, poly2_idx, poly_idx)
-    M._add_poly_to_ilist(ilist, poly2_idx)
+    M._add_line_to_ilist(gdata, poly2_idx, poly_idx)
+    M._add_poly_to_ilist(gdata, poly2_idx)
   else
-    M._add_poly_to_ilist(ilist, poly_idx)
+    M._add_poly_to_ilist(gdata, poly_idx)
   end
 end
 
-function M._add_poly_to_ilist(ilist, poly_idx, revert)
+function M._add_poly_to_ilist(gdata, poly_idx, revert)
   local sidx = poly_idx[1]
+  local ilist, next_ii = gdata.ilist, gdata.next_ii
   for i = 3, #poly_idx do
-    ilist[#ilist + 1] = sidx
+    ilist[next_ii] = sidx
     if revert then
-      ilist[#ilist + 1] = poly_idx[i-1]
-      ilist[#ilist + 1] = poly_idx[i]
+      ilist[next_ii + 1] = poly_idx[i-1]
+      ilist[next_ii + 2] = poly_idx[i]
     else
-      ilist[#ilist + 1] = poly_idx[i]
-      ilist[#ilist + 1] = poly_idx[i-1]
+      ilist[next_ii + 1] = poly_idx[i]
+      ilist[next_ii + 2] = poly_idx[i-1]
     end
+    next_ii = next_ii + 3
   end
+  gdata.next_ii = next_ii
 end
 
-function M._add_line_to_ilist(ilist, poly1_idx, poly2_idx)
+function M._add_line_to_ilist(gdata, poly1_idx, poly2_idx)
   local last_i = #poly1_idx
+  local ilist, next_ii = gdata.ilist, gdata.next_ii
   for i = 1, #poly1_idx do
     local v1, v2, v3, v4 = poly1_idx[last_i], poly1_idx[i], poly2_idx[i], poly2_idx[last_i]
-    ilist[#ilist + 1] = v1
-    ilist[#ilist + 1] = v2
-    ilist[#ilist + 1] = v3
-    ilist[#ilist + 1] = v1
-    ilist[#ilist + 1] = v3
-    ilist[#ilist + 1] = v4
+    ilist[next_ii] = v1
+    ilist[next_ii + 1] = v2
+    ilist[next_ii + 2] = v3
+    ilist[next_ii + 3] = v1
+    ilist[next_ii + 4] = v3
+    ilist[next_ii + 5] = v4
+    next_ii = next_ii + 6
     last_i = i
   end
+  gdata.next_ii = next_ii
 end
 
 -- same as C's DBL_EPSILON

@@ -1,6 +1,5 @@
 local LineMesh = require 'line_mesh'
-
-
+local ffi = require 'ffi'
 
 -- { { pass_fn_name, ...args }, ... }
 local debug_draws = {}
@@ -10,20 +9,23 @@ LineMesh.debug_draw = function(...)
   debug_draws[#debug_draws + 1] = { n = select('#', ...), ... }
 end
 
-local function add_line(points, radius, seg, opts)
-  local nopts = { debug_draws = debug_draws }
-  if opts then
-    for k, v in pairs(opts) do
-      nopts[k] = v
+local function add_line(points, radius, seg, _opts, draw_shader)
+  local opts = { debug_draws = debug_draws }
+  if _opts then
+    for k, v in pairs(_opts) do
+      opts[k] = v
     end
   end
   local st = os.clock()
-  local ok, vlist, ilist, len = xpcall(LineMesh.build, function(err)
+  local ok, vlist, ilist, line_len, vtotal, itotal = xpcall(LineMesh.build, function(err)
     print(err)
     print(debug.traceback())
-  end, points, radius, seg, nopts)
+  end, points, radius, seg, opts)
   local cost = (os.clock() - st) * 1000
-  print(string.format('add line, points: %i, cost: %.4f ms', #points, cost))
+  print(string.format(
+    'add line, points: %4i, cost: %7.4f ms. vtotal: %5i, itotal: %6i',
+    #points, cost, vtotal or 0, itotal or 0
+  ))
 
   local debug_line = {}
   for i, p in ipairs(points) do
@@ -35,15 +37,39 @@ local function add_line(points, radius, seg, opts)
       { name = 'VertexPosition', type = 'vec3' },
       { name = 'VertexNormal', type = 'vec3' },
       { name = 'VertexUV', type = 'vec2' },
-      { name = 'VertexColor', type = 'color' },
-    }, #vlist)
-    mesh:setVertices(vlist)
-    mesh:setIndices(ilist)
-    Meshes[#Meshes + 1] = { mesh, debug_line }
+      { name = 'VertexColor', type = 'vec4' },
+    }, vtotal)
+
+    if type(ilist) == 'cdata' then
+      local blob = lovr.data.newBlob(vtotal * 12 * 4)
+      local ptr = blob:getPointer()
+      ffi.copy(ptr, vlist, vtotal * 12 * 4)
+      mesh:setVertices(blob)
+      ffi.copy(ptr, ilist, itotal * 4)
+      mesh:setIndices(blob, 'u32')
+    else
+      mesh:setVertices(vlist)
+      mesh:setIndices(ilist)
+    end
+    Meshes[#Meshes + 1] = { mesh, debug_line, draw_shader }
   else
     Meshes[#Meshes + 1] = { nil, debug_line }
   end
 end
+
+local draw_shader = lovr.graphics.newShader([[
+vec4 lovrmain() {
+  return DefaultPosition;
+}
+]], [[
+vec4 lovrmain() {
+  vec4 col = DefaultColor;
+  col.rgb *= UV.x * Normal;
+  col.rgb = vec3(sin(UV.x * 100.) * 0.5 + 0.5, sin(UV.y * 10) * 0.5 + 0.5, 0.5);
+  // col = vec4(Normal, 1);
+  return col;
+}
+]])
 
 add_line({
   { 0.2, 0.2, 0 },
@@ -62,7 +88,7 @@ add_line({
   -- { 1.899, 2.5, 1.9 }, -- bad point
 }, nil, 6, {
   closed = true
-})
+}, draw_shader)
 
 add_line({
   { 0.3, 0.2, 0.3 },
@@ -113,6 +139,17 @@ do
     }
   end
   add_line(ps)
+
+  ps = {}
+  for i = 0, 200 do
+    local z = i * 0.03
+    ps[#ps + 1] = {
+      -2.5 + math.sin(z * math.pi * 3) * 0.5,
+      0.2 + (i >= 100 and ((i - 100) * 0.01) or 0),
+      1 + -z + (i >= 100 and ((i - 100) * 0.05) or 0)
+    }
+  end
+  add_line(ps, 0.01, 3, { output_type = 'cdata' })
 end
 
 do
@@ -127,20 +164,19 @@ do
   })
 end
 
+do
+  local ps = {}
+  local x, y, z = 5, 5, -2
+  math.randomseed(123)
+  for i = 1, 1000 do
+    ps[i] = { x, y, z }
+    x = x + math.random() - 0.5
+    y = y + math.random() - 0.5
+    z = z + math.random() - 0.5
+  end
+  add_line(ps, nil, nil, { output_type = 'cdata' })
+end
 
-local shader = lovr.graphics.newShader([[
-vec4 lovrmain() {
-  return DefaultPosition;
-}
-]], [[
-vec4 lovrmain() {
-  vec4 col = DefaultColor;
-  col.rgb *= UV.x * Normal;
-  col.rgb = vec3(sin(UV.x * 100.) * 0.5 + 0.5, sin(UV.y * 10) * 0.5 + 0.5, 0.5);
-  // col = vec4(Normal, 1);
-  return col;
-}
-]])
 
 local function draw_debug_data(pass)
   for i, mesh_info in ipairs(Meshes) do
@@ -191,10 +227,10 @@ function lovr.draw(pass)
   pass:setFaceCull('back')
   pass:setColor(1, 1, 1, 0.35)
   for i, mesh_info in ipairs(Meshes) do
-    if i == 2 then
-      pass:setShader(shader)
+    if mesh_info.shader then
+      pass:setShader(mesh_info.shader)
     else
-      pass:setShader('unlit')
+      pass:setShader()
     end
     if mesh_info[1] then
       pass:draw(mesh_info[1])

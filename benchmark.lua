@@ -16,9 +16,16 @@ do
   for i = 1, 100 do
     ps[#ps + 1] = { 1, math.sin(i * 0.05), 0 }
   end
+
   test('p100 x10000', function()
     for i = 1, 10000 do
       LineMesh.build(ps)
+    end
+  end)
+
+  test('p100 x10000 output cdata', function()
+    for i = 1, 10000 do
+      LineMesh.build(ps, nil, nil, { output_type = 'cdata' })
     end
   end)
 end
@@ -31,6 +38,12 @@ do
   test('p1000 x1000', function()
     for i = 1, 1000 do
       LineMesh.build(ps)
+    end
+  end)
+
+  test('p1000 x1000 seg:3', function()
+    for i = 1, 1000 do
+      LineMesh.build(ps, nil, 3)
     end
   end)
 end
