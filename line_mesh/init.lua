@@ -103,10 +103,10 @@ function M.build(_points, width, seg, opts)
 
   local gdata = {
     last_ps = {}, -- last point wrap points
-    last_dir = nil, last_rot = nil,
     poly_idx = {},
     last_poly_idx = {},
 
+    last_radius = nil,
     base_ps = base_ps,
     smooth = opts.smooth ~= false,
     seg = seg,
@@ -151,6 +151,33 @@ function M.build(_points, width, seg, opts)
     local first_poly_idx = {}
     for i = 1, seg do
       first_poly_idx[#first_poly_idx + 1] = i
+    end
+
+    local dir = (points[#points] - points[1]):normalize()
+    local bp
+    if gdata.output_type == 'cdata' then
+      local v = vlist[gdata.last_poly_idx[1] - 1]
+      bp = Vec3.raw_new(v.x, v.y, v.z)
+    else
+      local v = vlist[gdata.last_poly_idx[1]]
+      bp = Vec3.raw_new(v[1], v[2], v[3])
+    end
+    local best_tv, best_i = -2, 1
+    for i = 1, seg do
+      local tv
+      if gdata.output_type == 'cdata' then
+        local v = vlist[first_poly_idx[i] - 1]
+        tv = dir:dot((bp - { v.x, v.y, v.z }):normalize())
+      else
+        local v = vlist[first_poly_idx[i]]
+        tv = dir:dot((bp - { v[1], v[2], v[3] }):normalize())
+      end
+      if tv > best_tv then
+        best_tv, best_i = tv, i
+      end
+    end
+    for i = 1, best_i - 1 do
+      first_poly_idx[seg] = table.remove(first_poly_idx, 1)
     end
     M._add_line_to_ilist(gdata, gdata.last_poly_idx, first_poly_idx)
   end
@@ -297,32 +324,43 @@ end
 
 function M._wrap_point(point, dir, pinfo, out_poly_idx, gdata)
   local last_ps = gdata.last_ps
-  local last_dir = gdata.last_dir
+  local last_radius = gdata.last_radius or pinfo.radius
 
-  local rot = last_dir and (Quat.new(last_dir, dir) * gdata.last_rot) or Quat.new(dir)
-  gdata.last_rot = rot
-  gdata.last_dir = dir
+  local rot
+  if not last_ps[1] then
+    rot = Quat.new(dir)
+  end
   local color = pinfo.color
+  local scale = pinfo.radius / last_radius
 
   local vlist, next_vi = gdata.vlist, gdata.next_vi
+  local ray_ov = dir * 10000
   for i = 1, gdata.seg do
-    local lp = point + rot * gdata.base_ps[i] * pinfo.radius
-    last_ps[i] = lp
+    local lp = last_ps[i]
+    local p
+    if lp then
+      p = M._ray_plane(lp - ray_ov, dir, point, dir)
+      p = point + (p - point) * scale
+      assert(p, "Failed to wrap point "..tostring(point))
+    else
+      p = point + rot * gdata.base_ps[i] * pinfo.radius
+    end
+    last_ps[i] = p
 
     -- local l = i / gdata.seg
     -- M.debug_draw('setColor', l, l, l)
     -- M.debug_draw('sphere', LVec3(lp), 0.005)
 
-    local nrm = M._calc_normal(lp, point, dir)
+    local nrm = M._calc_normal(p, point, dir)
     -- if type(vlist) == 'table' then
     if gdata.output_type == 'cdata' then
       vlist[next_vi] = LineMeshOutputVertex(
-        lp[1], lp[2], lp[3], nrm[1], nrm[2], nrm[3],
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
         pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
       )
     else
       vlist[next_vi] = {
-        lp[1], lp[2], lp[3], nrm[1], nrm[2], nrm[3],
+        p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
         pinfo.plen, (i - 1) / (gdata.seg - 1), color[1], color[2], color[3], color[4] or 1
       }
     end
@@ -330,6 +368,7 @@ function M._wrap_point(point, dir, pinfo, out_poly_idx, gdata)
     next_vi = next_vi + 1
   end
   gdata.next_vi = next_vi
+  gdata.last_radius = pinfo.radius
   -- M.debug_draw('setColor', 1, 1, 1)
   out_poly_idx[gdata.seg + 1] = nil
 end
@@ -340,29 +379,38 @@ function M._wrap_point_on_plane(
   point, dir_src, plane_dir, dir_mid, inner_ov, pinfo, out_poly_idx, gdata
 )
   local last_ps = gdata.last_ps
-  local last_dir = gdata.last_dir
-  local rot = last_dir and (Quat.new(last_dir, plane_dir) * gdata.last_rot) or Quat.new(plane_dir)
+  local last_radius = gdata.last_radius or pinfo.radius
+  local rot, scale
+  if not last_ps[1] then
+    rot = Quat.new(plane_dir)
+    scale = inner_ov / pinfo.radius - 1
+  else
+    scale = pinfo.radius / last_radius
+  end
 
-  gdata.last_dir = plane_dir
-  gdata.last_rot = rot
+
   local color = pinfo.color
-  local s = inner_ov / pinfo.radius - 1
 
   local vlist, next_vi = gdata.vlist, gdata.next_vi
+  local ray_ov = dir_src * 10000
   for i = 1, gdata.seg do
-    local bp = rot * (gdata.base_ps[i] * pinfo.radius)
-    bp:add(dir_mid * (dir_mid:dot(bp) * s))
-    local p = point + bp
+    local p
+    local lp = last_ps[i]
+    if lp then
+      p = M._ray_plane(lp - ray_ov, dir_src, point, plane_dir)
+      assert(p, 'Failed to wrap point '..tostring(point))
+      p = point + (p - point) * scale
+    else
+      local bp = rot * (gdata.base_ps[i] * pinfo.radius)
+      bp:add(dir_mid * (dir_mid:dot(bp) * scale))
+      p = point + bp
+    end
+    last_ps[i] = p
 
     -- local l = i / gdata.seg
     -- M.debug_draw('setColor', l, l, l)
     -- M.debug_draw('sphere', LVec3(p), 0.005)
 
-    if last_ps[i] then
-      last_ps[i] = p
-    else
-      last_ps[i] = p
-    end
     local nrm = M._calc_normal(p, point, dir_src)
     if gdata.output_type == 'cdata' then
       vlist[next_vi] = LineMeshOutputVertex(
@@ -379,6 +427,7 @@ function M._wrap_point_on_plane(
     next_vi = next_vi + 1
   end
   gdata.next_vi = next_vi
+  gdata.last_radius = pinfo.radius
   out_poly_idx[gdata.seg + 1] = nil
 end
 
@@ -507,6 +556,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
   end
 
   -- copy smmoth vertex for p2 to p3
+  assert(#next_ps == #gdata.last_ps, 'invalid ps')
   gdata.last_ps = next_ps
   for i, p in ipairs(next_ps) do
     local nrm = M._calc_normal(p, p3, dir23)
