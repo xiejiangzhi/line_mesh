@@ -29,6 +29,9 @@ if lovr then
 end
 
 local ok, ffi = pcall(require, 'ffi')
+if not ok then
+  ffi = nil
+end
 
 local LineMeshOutputVertex
 if ffi then
@@ -246,10 +249,8 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, gdata)
     gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
   else
     -- sharp angle, smoothing
-
     M._wrap_point_on_plane(p2, dir12, dir_mid_side, dir_mid, inner_ov, pinfo, gdata.poly_idx, gdata)
     M._add_line_to_ilist(gdata, gdata.last_poly_idx, gdata.poly_idx)
-
     M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot, gdata)
   end
 end
@@ -473,6 +474,11 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       end
       fill_poly[#fill_poly + 1] = sp
 
+      -- local l = i / gdata.seg
+      -- M.debug_draw('setColor', l, l, l)
+      -- M.debug_draw('sphere', LVec3(sp), 0.003)
+      -- M.debug_draw('setColor', 1, 1, 1)
+
       -- move poly point to plane, dir: p2 -> p3
       local np = M._ray_plane(p, dir23, cut_p, dir_mid) or p
       next_ps[#next_ps + 1] = np
@@ -620,19 +626,19 @@ end
 local DBL_EPSILON = 2.2204460492503131e-16
 
 function M._ray_plane(ray_pos, ray_dir, plane_pos, plane_normal)
-	local denom = plane_normal:dot(ray_dir)
-	-- ray does not intersect plane
-	if math.abs(denom) < DBL_EPSILON then
-		return false
-	end
-	-- distance of direction
-	local d = plane_pos - ray_pos
-	local t = d:dot(plane_normal) / denom
-	if t < DBL_EPSILON then
-		return false
-	end
-	-- Return collision point and distance from ray origin
-	return ray_pos + ray_dir * t, t
+  local denom = plane_normal:dot(ray_dir)
+  -- ray does not intersect plane
+  if math.abs(denom) < DBL_EPSILON then
+    return false
+  end
+  -- distance of direction
+  local d = plane_pos - ray_pos
+  local t = d:dot(plane_normal) / denom
+  if t < DBL_EPSILON then
+    return false
+  end
+  -- Return collision point and distance from ray origin
+  return ray_pos + ray_dir * t, t
 end
 
 function M._calc_normal(p, line_p, line_dir)

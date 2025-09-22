@@ -1,6 +1,7 @@
-require('jit.v').on('jit.trace')
+-- require('jit.v').on('jit.trace')
 
-local LineMesh = require 'line_mesh.init'
+package.path = './?/init.lua;'..package.path
+local LineMesh = require 'line_mesh'
 
 local function test(name, fn)
   for i = 1, 3 do

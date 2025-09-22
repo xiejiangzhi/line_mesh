@@ -14,8 +14,11 @@ NOTE: The current version has not been optimized, so generation should be relati
 * Support for closed paths
 * Support UV
 
+
 **TODO**:
 
+* Fix sharp point mesh
+* Fix UV for sharp point
 * Supports append point to path
 
 

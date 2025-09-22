@@ -9,7 +9,7 @@ LineMesh.debug_draw = function(...)
   debug_draws[#debug_draws + 1] = { n = select('#', ...), ... }
 end
 
-local function add_line(points, radius, seg, _opts, draw_shader)
+local function add_line(points, radius, seg, _opts)
   local opts = { debug_draws = debug_draws }
   if _opts then
     for k, v in pairs(_opts) do
@@ -51,25 +51,11 @@ local function add_line(points, radius, seg, _opts, draw_shader)
       mesh:setVertices(vlist)
       mesh:setIndices(ilist)
     end
-    Meshes[#Meshes + 1] = { mesh, debug_line, draw_shader }
+    Meshes[#Meshes + 1] = { mesh, debug_line }
   else
     Meshes[#Meshes + 1] = { nil, debug_line }
   end
 end
-
-local draw_shader = lovr.graphics.newShader([[
-vec4 lovrmain() {
-  return DefaultPosition;
-}
-]], [[
-vec4 lovrmain() {
-  vec4 col = DefaultColor;
-  col.rgb *= UV.x * Normal;
-  col.rgb = vec3(sin(UV.x * 100.) * 0.5 + 0.5, sin(UV.y * 10) * 0.5 + 0.5, 0.5);
-  // col = vec4(Normal, 1);
-  return col;
-}
-]])
 
 add_line({
   { 0.2, 0.2, 0 },
@@ -88,7 +74,7 @@ add_line({
   -- { 1.899, 2.5, 1.9 }, -- bad point
 }, nil, 6, {
   closed = true
-}, draw_shader)
+})
 
 add_line({
   { 0.3, 0.2, 0.3 },
@@ -191,6 +177,36 @@ local function draw_debug_data(pass)
   end
 end
 
+local draw_shader = lovr.graphics.newShader([[
+vec4 lovrmain() {
+  return DefaultPosition;
+}
+]], [[
+uniform int ColorMode;
+vec4 lovrmain() {
+  vec4 col;
+  if (ColorMode == 2) {
+    col = vec4(Normal, 1);
+  } else if (ColorMode == 3) {
+    col = vec4(fract(PositionWorld * 4), 1);
+  } else if (ColorMode == 4) {
+    col = vec4(vec3(UV.x), 1);
+  } else if (ColorMode == 5) {
+    col = vec4(vec3(UV.y), 1);
+  } else {
+    col = DefaultColor;
+  }
+  return col;
+}
+]])
+local ColorMode = 1
+local ColorModes = {
+  'Color',
+  'Normal',
+  'Positioin',
+  'UV.x', 'UV.y',
+  'Wireframe', 'Wireframe-Cull'
+}
 
 local time = 0
 local Paused = false
@@ -224,14 +240,21 @@ function lovr.draw(pass)
     end
   end
 
-  pass:setFaceCull('back')
-  pass:setColor(1, 1, 1, 0.35)
+  if ColorModes[ColorMode] == 'Wireframe-Cull' then
+    pass:setFaceCull('back')
+    pass:setColor(1, 1, 1, 1)
+    pass:setWireframe(true)
+  elseif ColorModes[ColorMode] == 'Wireframe' then
+    pass:setFaceCull('none')
+    pass:setColor(1, 1, 1, 1)
+    pass:setWireframe(true)
+  else
+    pass:setFaceCull('back')
+    pass:setColor(1, 1, 1, 0.15)
+    pass:setShader(draw_shader)
+    pass:send('ColorMode', ColorMode)
+  end
   for i, mesh_info in ipairs(Meshes) do
-    if mesh_info.shader then
-      pass:setShader(mesh_info.shader)
-    else
-      pass:setShader()
-    end
     if mesh_info[1] then
       pass:draw(mesh_info[1])
     end
@@ -241,5 +264,11 @@ end
 function lovr.keypressed(key)
   if key == 'space' then
     Paused = not Paused
+  else
+    local i = tonumber(key)
+    if i and ColorModes[i] then
+      ColorMode = i
+      print('ColorMode: '..ColorModes[i])
+    end
   end
 end
