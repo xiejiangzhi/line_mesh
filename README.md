@@ -17,7 +17,6 @@ NOTE: The current version has not been optimized, so generation should be relati
 
 **TODO**:
 
-* Fix sharp point mesh
 * Fix UV for sharp point
 * Supports append point to path
 
@@ -47,5 +46,5 @@ More see main.lua
 
 ## Known issues
 
-* When angles are too sharp (approaching overlap), the generated mesh may overlap.
+* When angles are too sharp (approaching overlap), the generated mesh may overlap. (demo rand points 551)
 * When the distance between points is too close (less than the line radius) and the angle is relatively sharp, the generated mesh may overlap.

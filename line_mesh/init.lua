@@ -446,7 +446,8 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
   local next_add_data = {}
   local fill_poly = {}
   local fill_poly_next = {}
-  local fill_poly_next_start = nil
+  local fill_cut_p1, fill_cut_p2
+  local fill_insert_i = nil
 
   local lcolor = pinfo.color
   local cut_p = p2 - dir_mid * pinfo.radius * 0.6
@@ -466,7 +467,9 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       -- test poly(to prev point) intersection
       local prev_cut_p, len = M._ray_plane(p, (prev_p - p):normalize(), cut_p, dir_mid)
       if prev_cut_p and len < prev_p:distance(p) then
-        -- M.debug_draw('sphere', LVec3(prev_cut_p), 0.005)
+        -- M.debug_draw('setColor', 1, 0, 0)
+        -- M.debug_draw('sphere', LVec3(prev_cut_p), 0.001)
+        -- M.debug_draw('setColor', 1, 1, 1)
         local nrm = M._calc_normal(prev_cut_p, p2, dir21)
         if gdata.output_type == 'cdata' then
           vlist[next_vi] = LineMeshOutputVertex(
@@ -485,13 +488,15 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         next_ii = next_ii + 3
         next_add_data[#next_add_data + 1] = { next_vi, prev_i, i }
         next_vi = next_vi + 1
-        fill_poly[#fill_poly + 1] = prev_cut_p
+        fill_cut_p1 = prev_cut_p
       end
 
       -- test poly(to next point) intersection
       local next_cut_p, len = M._ray_plane(p, (next_p - p):normalize(), cut_p, dir_mid)
       if next_cut_p and len < next_p:distance(p) then
-        -- M.debug_draw('sphere', LVec3(next_cut_p), 0.005)
+        -- M.debug_draw('setColor', 0, 0, 1)
+        -- M.debug_draw('sphere', LVec3(next_cut_p), 0.001)
+        -- M.debug_draw('setColor', 1, 1, 1)
         local nrm = M._calc_normal(next_cut_p, p2, dir23)
         if gdata.output_type == 'cdata' then
           vlist[next_vi] = LineMeshOutputVertex(
@@ -510,8 +515,12 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         next_ii = next_ii + 3
         next_add_data[#next_add_data + 1] = { next_vi, i, next_i }
         next_vi = next_vi + 1
-        fill_poly_next_start = next_cut_p
+        fill_cut_p2 = next_cut_p
       end
+
+      -- M.debug_draw('setColor', 0, 1, 0)
+      -- M.debug_draw('sphere', LVec3(p), 0.002)
+      -- M.debug_draw('setColor', 1, 1, 1)
 
       -- move poly point to plane, dir: p2 -> p1
       local sp = M._ray_plane(p, dir21, cut_p, dir_mid) or p -- direct use p if point on plane,
@@ -521,38 +530,60 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       else
         v[1], v[2], v[3] = sp[1], sp[2], sp[3]
       end
-      fill_poly[#fill_poly + 1] = sp
 
       -- local l = i / gdata.seg
       -- M.debug_draw('setColor', l, l, l)
-      -- M.debug_draw('sphere', LVec3(sp), 0.003)
+      -- M.debug_draw('sphere', LVec3(sp), 0.001)
       -- M.debug_draw('setColor', 1, 1, 1)
 
       -- move poly point to plane, dir: p2 -> p3
       local np = M._ray_plane(p, dir23, cut_p, dir_mid) or p
-      next_ps[#next_ps + 1] = np
-      fill_poly_next[#fill_poly_next + 1] = np
 
-      -- M.debug_draw('setColor', 0.3, 0.3, 0.3)
-      -- M.debug_draw('line', LVec3(p), LVec3(sp))
-      -- M.debug_draw('line', LVec3(p), LVec3(np))
+      if fill_insert_i then
+        table.insert(fill_poly, fill_insert_i, sp)
+        table.insert(fill_poly_next, fill_insert_i, np)
+        fill_insert_i = fill_insert_i + 1
+      else
+        fill_poly[#fill_poly + 1] = sp
+        fill_poly_next[#fill_poly_next + 1] = np
+      end
+
+      next_ps[#next_ps + 1] = np
+
+      -- M.debug_draw('setColor', l, l, 0)
+      -- M.debug_draw('sphere', LVec3(np), 0.001)
+      -- M.debug_draw('setColor', 1, 1, 1)
     else
       next_ps[#next_ps + 1] = p
-      if cut_dist <= 1e-6 then
-        fill_poly[#fill_poly + 1] = p
-      end
+      fill_insert_i = fill_insert_i or 1
+      -- if cut_dist <= 1e-6 then
+      --   fill_poly[#fill_poly + 1] = p
+      -- end
     end
   end
   -- M.debug_draw('setColor', 1, 1, 1)
   gdata.last_poly_idx, gdata.poly_idx = gdata.poly_idx, gdata.last_poly_idx
 
-  fill_poly[#fill_poly + 1] = fill_poly_next_start
-  for i = #fill_poly_next, 1, -1 do
-    fill_poly[#fill_poly + 1] = fill_poly_next[i]
+  if fill_poly[1]:distance(fill_cut_p1) <= fill_poly[1]:distance(fill_cut_p2) then
+    table.insert(fill_poly, 1, fill_cut_p1)
+    fill_poly[#fill_poly + 1] = fill_cut_p2
+    for i = #fill_poly_next, 1, -1 do
+      fill_poly[#fill_poly + 1] = fill_poly_next[i]
+    end
+  else
+    table.insert(fill_poly, 1, fill_cut_p2)
+    fill_poly[#fill_poly + 1] = fill_cut_p1
+    for i = #fill_poly_next, 1, -1 do
+      fill_poly[#fill_poly + 1] = fill_poly_next[i]
+    end
   end
-  for i = 1, #fill_poly * 0.5 do
-    local j = #fill_poly - i + 1
-    fill_poly[i], fill_poly[j] = fill_poly[j], fill_poly[i]
+  -- check triangle normal
+  local tri_normal = (fill_poly[2] - fill_poly[1]):cross(fill_poly[3] - fill_poly[1])
+  if dir_mid:dot(tri_normal) < 0 then
+    for i = 1, #fill_poly * 0.5 do
+      local j = #fill_poly - i + 1
+      fill_poly[i], fill_poly[j] = fill_poly[j], fill_poly[i]
+    end
   end
 
   -- copy smmoth vertex for p2 to p3
@@ -590,7 +621,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
   for i, p in ipairs(fill_poly) do
     -- local l = i / #fill_poly
     -- M.debug_draw('setColor', 0.1, 0.1, l)
-    -- M.debug_draw('sphere', LVec3(p), 0.005)
+    -- M.debug_draw('sphere', LVec3(p), 0.001)
 
     local nrm = M._calc_normal(p, p3, dir23)
     if gdata.output_type == 'cdata' then
@@ -610,7 +641,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
     if poly2_dist > 0.01 then
       local sp = cut_p + (p - cut_p) * 0.5 - dir_mid * (pinfo.radius * 0.4 * poly2_dist)
       -- M.debug_draw('setColor', l, 0.1, 0.1)
-      -- M.debug_draw('sphere', LVec3(sp), 0.005)
+      -- M.debug_draw('sphere', LVec3(sp), 0.001)
       nrm = (sp - p2):normalize()
       if gdata.output_type == 'cdata' then
         vlist[next_vi] = LineMeshOutputVertex(
