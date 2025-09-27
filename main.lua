@@ -9,22 +9,18 @@ LineMesh.debug_draw = function(...)
   debug_draws[#debug_draws + 1] = { n = select('#', ...), ... }
 end
 
-local function add_line(points, radius, seg, _opts)
-  local opts = { debug_draws = debug_draws }
-  if _opts then
-    for k, v in pairs(_opts) do
-      opts[k] = v
-    end
-  end
+local err_cb = function(err)
+  print(err)
+  print(debug.traceback())
+end
+
+local function add_line(points, radius, seg, opts)
   local st = os.clock()
-  local ok, vlist, ilist, line_len, vtotal, itotal = xpcall(LineMesh.build, function(err)
-    print(err)
-    print(debug.traceback())
-  end, points, radius, seg, opts)
+  local ok, vlist, ilist, line_len, vtotal, itotal = xpcall(LineMesh.build, err_cb, points, radius, seg, opts)
   local cost = (os.clock() - st) * 1000
   print(string.format(
-    'add line, points: %4i, cost: %7.4f ms. vtotal: %5i, itotal: %6i',
-    #points, cost, vtotal or 0, itotal or 0
+    'add line, points: %4i, cost: %7.4f ms. len: %7.2f, vtotal: %5i, itotal: %6i',
+    #points, cost, line_len, vtotal or 0, itotal or 0
   ))
 
   local debug_line = {}
@@ -208,13 +204,8 @@ local ColorModes = {
   'Wireframe', 'Wireframe-Cull'
 }
 
-local time = 0
-local Paused = false
-function lovr.update(dt)
-  if not Paused then
-    time = time + dt
-  end
-end
+-- function lovr.update(dt)
+-- end
 
 function lovr.draw(pass)
   pass:transform(vec3(0, 0, -3))
@@ -261,14 +252,11 @@ function lovr.draw(pass)
   end
 end
 
+-- change color mode by 1 - #ColorModes
 function lovr.keypressed(key)
-  if key == 'space' then
-    Paused = not Paused
-  else
-    local i = tonumber(key)
-    if i and ColorModes[i] then
-      ColorMode = i
-      print('ColorMode: '..ColorModes[i])
-    end
+  local i = tonumber(key)
+  if i and ColorModes[i] then
+    ColorMode = i
+    print('ColorMode: '..ColorModes[i])
   end
 end
