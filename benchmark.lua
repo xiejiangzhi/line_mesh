@@ -8,8 +8,10 @@ if _VERSION == 'Luau' then
 else
   package.path = './?/init.lua;'..package.path
   LineMesh = require 'line_mesh'
-  jit.off()
-  print('jit status', jit.status())
+  if jit then
+    jit.off()
+    print('jit status', jit.status())
+  end
 end
 
 
