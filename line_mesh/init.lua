@@ -16,8 +16,8 @@ end
 
 local Vec3, Quat
 if _VERSION == 'Luau' then
-  Vec3 = require('./vec3')
-  Quat = require('./quat')
+  Vec3 = require('./line_mesh/vec3')
+  Quat = require('./line_mesh/quat')
 else
   local mdir = (...):gsub("%.init$", '')
   Vec3 = require(mdir..'.vec3')
