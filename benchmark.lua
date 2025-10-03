@@ -1,6 +1,11 @@
 -- require('jit.v').on('jit.trace')
+-- jit.off()
 
-print('lua version', _VERSION)
+if jit then
+  print('lua version', _VERSION, jit and (' | '..jit.version) or '', 'jit '..(jit.status() and 'on' or 'off'))
+else
+  print('lua version', _VERSION)
+end
 
 local LineMesh
 if _VERSION == 'Luau' then
@@ -8,10 +13,6 @@ if _VERSION == 'Luau' then
 else
   package.path = './?/init.lua;'..package.path
   LineMesh = require 'line_mesh'
-  if jit then
-    jit.off()
-    print('jit status', jit.status())
-  end
 end
 
 

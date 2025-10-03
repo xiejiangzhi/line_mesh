@@ -83,6 +83,7 @@ function M.build(_points, width, seg, opts)
 
   local vlist, ilist, next_vi, next_ii
   if opts.output_type == 'cdata' then
+    assert(ffi, 'Cannot use cdata without luajit')
     local tv, ti = M.predirect_output_size(points, seg)
     vlist = ffi.new('LineMeshOutputVertex[?]', tv)
     ilist = ffi.new('uint32_t[?]', ti)
