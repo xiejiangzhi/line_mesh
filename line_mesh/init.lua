@@ -14,9 +14,15 @@ if lovr then
   LQuat = Quat
 end
 
-local mdir = (...):gsub("%.init$", '')
-local Vec3 = require(mdir..'.vec3')
-local Quat = require(mdir..'.quat')
+local Vec3, Quat
+if _VERSION == 'Luau' then
+  Vec3 = require('./vec3')
+  Quat = require('./quat')
+else
+  local mdir = (...):gsub("%.init$", '')
+  Vec3 = require(mdir..'.vec3')
+  Quat = require(mdir..'.quat')
+end
 
 -- for debug
 if lovr then
@@ -352,7 +358,6 @@ function M._wrap_point(point, dir, pinfo, out_poly_idx, gdata)
     -- M.debug_draw('sphere', LVec3(lp), 0.005)
 
     local nrm = M._calc_normal(p, point, dir)
-    -- if type(vlist) == 'table' then
     if gdata.output_type == 'cdata' then
       vlist[next_vi] = LineMeshOutputVertex(
         p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
@@ -388,9 +393,7 @@ function M._wrap_point_on_plane(
     scale = pinfo.radius / last_radius
   end
 
-
   local color = pinfo.color
-
   local vlist, next_vi = gdata.vlist, gdata.next_vi
   local ray_ov = dir_src * 10000
   for i = 1, gdata.seg do

@@ -1,7 +1,17 @@
 -- require('jit.v').on('jit.trace')
 
-package.path = './?/init.lua;'..package.path
-local LineMesh = require 'line_mesh'
+print('lua version', _VERSION)
+
+local LineMesh
+if _VERSION == 'Luau' then
+  LineMesh = require './line_mesh'
+else
+  package.path = './?/init.lua;'..package.path
+  LineMesh = require 'line_mesh'
+  jit.off()
+  print('jit status', jit.status())
+end
+
 
 local function test(name, fn)
   for i = 1, 3 do
@@ -9,6 +19,7 @@ local function test(name, fn)
     fn()
     local cost = (os.clock() - st) * 1000
     print(string.format("%s, cost: %.4f", name, cost))
+    collectgarbage()
   end
 end
 

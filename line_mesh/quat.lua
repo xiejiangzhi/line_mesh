@@ -1,5 +1,10 @@
-local mdir = (...):gsub("%.%w+$", '')
-local Vec3 = require(mdir..'.vec3')
+local Vec3
+if _VERSION == 'Luau' then
+  Vec3 = require('./vec3')
+else
+  local mdir = (...):gsub("%.%w+$", '')
+  Vec3 = require(mdir..'.vec3')
+end
 
 local Quat = {}
 Quat.__index = Quat
