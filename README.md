@@ -5,7 +5,7 @@ Line Mesh
 
 Generate a mesh from a path line formed by connecting 3D points
 
-NOTE: The current version has not been optimized, so generation should be relatively slow.
+Supported lua version: `luajit`, `lua` 5.1 - 5.4, `luau`
 
 **Key Features**:
 
