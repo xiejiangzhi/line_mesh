@@ -17,7 +17,6 @@ Supported lua version: `luajit`, `lua` 5.1 - 5.4, `luau`(Currently used for expe
 
 **TODO**:
 
-* Fix UV for sharp point
 * Supports append point to path
 
 

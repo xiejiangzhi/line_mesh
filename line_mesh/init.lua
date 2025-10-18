@@ -452,6 +452,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
   local fill_poly_next = {}
   local fill_cut_p1, fill_cut_p2
   local fill_insert_i = nil
+  local fill_poly_uv_map = {}
 
   local lcolor = pinfo.color
   local cut_p = p2 - dir_mid * pinfo.radius * 0.6
@@ -468,6 +469,14 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       local prev_p = gdata.last_ps[prev_i]
       local next_p = gdata.last_ps[next_i]
 
+      local pv = vlist[gdata.poly_idx[i]]
+      local uv_y
+      if gdata.output_type == 'cdata' then
+        uv_y = pv.v
+      else
+        uv_y = pv[8]
+      end
+
       -- test poly(to prev point) intersection
       local prev_cut_p, len = M._ray_plane(p, (prev_p - p):normalize(), cut_p, dir_mid)
       if prev_cut_p and len < prev_p:distance(p) then
@@ -475,10 +484,11 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         -- M.debug_draw('sphere', LVec3(prev_cut_p), 0.001)
         -- M.debug_draw('setColor', 1, 1, 1)
         local nrm = M._calc_normal(prev_cut_p, p2, dir21)
+        -- TODO mix uv_y from prev_p to p to make better uv_y
         if gdata.output_type == 'cdata' then
           vlist[next_vi] = LineMeshOutputVertex(
             prev_cut_p[1],  prev_cut_p[2],  prev_cut_p[3], nrm[1], nrm[2], nrm[3],
-            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+            pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
           )
         else
           vlist[next_vi] = {
@@ -493,6 +503,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         next_add_data[#next_add_data + 1] = { next_vi, prev_i, i }
         next_vi = next_vi + 1
         fill_cut_p1 = prev_cut_p
+        fill_poly_uv_map[fill_cut_p1] = (i - 1) / (gdata.seg - 1)
       end
 
       -- test poly(to next point) intersection
@@ -502,6 +513,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         -- M.debug_draw('sphere', LVec3(next_cut_p), 0.001)
         -- M.debug_draw('setColor', 1, 1, 1)
         local nrm = M._calc_normal(next_cut_p, p2, dir23)
+        -- TODO mix uv_y from next_p to p to make better uv_y
         if gdata.output_type == 'cdata' then
           vlist[next_vi] = LineMeshOutputVertex(
             next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
@@ -520,6 +532,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         next_add_data[#next_add_data + 1] = { next_vi, i, next_i }
         next_vi = next_vi + 1
         fill_cut_p2 = next_cut_p
+        fill_poly_uv_map[fill_cut_p2] = (i - 1) / (gdata.seg - 1)
       end
 
       -- M.debug_draw('setColor', 0, 1, 0)
@@ -528,11 +541,10 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
 
       -- move poly point to plane, dir: p2 -> p1
       local sp = M._ray_plane(p, dir21, cut_p, dir_mid) or p -- direct use p if point on plane,
-      local v = vlist[gdata.poly_idx[i]]
       if gdata.output_type == 'cdata' then
-        v.x, v.y, v.z = sp[1], sp[2], sp[3]
+        pv.x, pv.y, pv.z = sp[1], sp[2], sp[3]
       else
-        v[1], v[2], v[3] = sp[1], sp[2], sp[3]
+        pv[1], pv[2], pv[3] = sp[1], sp[2], sp[3]
       end
 
       -- local l = i / gdata.seg
@@ -551,6 +563,8 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         fill_poly[#fill_poly + 1] = sp
         fill_poly_next[#fill_poly_next + 1] = np
       end
+      fill_poly_uv_map[sp] = uv_y
+      fill_poly_uv_map[np] = uv_y
 
       next_ps[#next_ps + 1] = np
 
@@ -627,16 +641,17 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
     -- M.debug_draw('setColor', 0.1, 0.1, l)
     -- M.debug_draw('sphere', LVec3(p), 0.001)
 
+    local uv_y = fill_poly_uv_map[p] or 0
     local nrm = M._calc_normal(p, p3, dir23)
     if gdata.output_type == 'cdata' then
       vlist[next_vi] = LineMeshOutputVertex(
         p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
-        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+        pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
       )
     else
       vlist[next_vi] = {
         p[1], p[2], p[3], nrm[1], nrm[2], nrm[3],
-        pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+        pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
       }
     end
     poly_idx[#poly_idx + 1] = next_vi
@@ -646,16 +661,18 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       local sp = cut_p + (p - cut_p) * 0.5 - dir_mid * (pinfo.radius * 0.4 * poly2_dist)
       -- M.debug_draw('setColor', l, 0.1, 0.1)
       -- M.debug_draw('sphere', LVec3(sp), 0.001)
+
+      -- TODO smooth uv_y according fill_poly uv_y
       nrm = (sp - p2):normalize()
       if gdata.output_type == 'cdata' then
         vlist[next_vi] = LineMeshOutputVertex(
           sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
-          pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
         )
       else
         vlist[next_vi] = {
           sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
-          pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
         }
       end
       poly2_idx[#poly2_idx + 1] = next_vi
