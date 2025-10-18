@@ -493,7 +493,7 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         else
           vlist[next_vi] = {
             prev_cut_p[1],  prev_cut_p[2],  prev_cut_p[3], nrm[1], nrm[2], nrm[3],
-            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+            pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
           }
         end
         ilist[next_ii] = next_vi
@@ -517,12 +517,12 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
         if gdata.output_type == 'cdata' then
           vlist[next_vi] = LineMeshOutputVertex(
             next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
-            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+            pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
           )
         else
           vlist[next_vi] = {
             next_cut_p[1],  next_cut_p[2], next_cut_p[3], nrm[1], nrm[2], nrm[3],
-            pinfo.plen, (i - 1) / (gdata.seg - 1), lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+            pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
           }
         end
         ilist[next_ii] = next_vi
@@ -636,6 +636,8 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
   local poly2_idx = {}
   local poly2_dist = 0.2 + (line_dot + 0.6) / 3
 
+  local total_fill_ps = #fill_poly
+  local uv_move = math.floor(total_fill_ps * 0.5)
   for i, p in ipairs(fill_poly) do
     -- local l = i / #fill_poly
     -- M.debug_draw('setColor', 0.1, 0.1, l)
@@ -662,17 +664,23 @@ function M._smooth_point_data(p1, p2, p3, pinfo, dir21, dir23, dir_mid, line_dot
       -- M.debug_draw('setColor', l, 0.1, 0.1)
       -- M.debug_draw('sphere', LVec3(sp), 0.001)
 
-      -- TODO smooth uv_y according fill_poly uv_y
+      -- Find a far point and use the point's uv_y to smooth current point uv_y
+      local mp_i = (i + uv_move - 1) % total_fill_ps + 1
+      local mp = fill_poly[mp_i]
+      local f = (sp - p):length() / (mp - p):length()
+      local suv_y = uv_y * (1 - f) + (fill_poly_uv_map[mp] or 0) * f
+
       nrm = (sp - p2):normalize()
+      -- local suv_y = uv_y +
       if gdata.output_type == 'cdata' then
         vlist[next_vi] = LineMeshOutputVertex(
           sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
-          pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          pinfo.plen, suv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
         )
       else
         vlist[next_vi] = {
           sp[1], sp[2], sp[3], nrm[1], nrm[2], nrm[3],
-          pinfo.plen, uv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
+          pinfo.plen, suv_y, lcolor[1], lcolor[2], lcolor[3], lcolor[4] or 1
         }
       end
       poly2_idx[#poly2_idx + 1] = next_vi
