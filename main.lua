@@ -16,7 +16,9 @@ end
 
 local function add_line(points, radius, seg, opts)
   local st = os.clock()
-  local ok, vlist, ilist, line_len, vtotal, itotal = xpcall(LineMesh.build, err_cb, points, radius, seg, opts)
+  local ok, vlist, ilist, line_len, vtotal, itotal = xpcall(
+    LineMesh.build, err_cb, points, radius, seg, opts
+  )
   local cost = (os.clock() - st) * 1000
   print(string.format(
     'add line, points: %4i, cost: %7.4f ms. len: %7.2f, vtotal: %5i, itotal: %6i',
@@ -131,7 +133,7 @@ do
       1 + -z + (i >= 100 and ((i - 100) * 0.05) or 0)
     }
   end
-  add_line(ps, 0.01, 3, { output_type = 'cdata' })
+  add_line(ps, 0.04, 3, { output_type = 'cdata' })
 end
 
 do
@@ -204,10 +206,47 @@ local ColorModes = {
   'Wireframe', 'Wireframe-Cull'
 }
 
--- function lovr.update(dt)
--- end
+local DrawSet = {}
+local DrawFunc = nil
+
+local time = 0
+
+function lovr.update(dt)
+  time = time + dt
+end
 
 function lovr.draw(pass)
+  (DrawFunc or DrawSet.default)(pass)
+end
+
+-- change color mode by 1 - #ColorModes
+function lovr.keypressed(key)
+
+  if lovr.system.isKeyDown('lalt') then
+    if key == '1' then
+      DrawFunc = DrawSet.default
+      print('draw set: default')
+    elseif key == '2' then
+      DrawFunc = DrawSet.cpu_mesh
+      print('draw set: cpu_mesh')
+    elseif key == '3' then
+      DrawFunc = DrawSet.gpu_mesh
+      print('draw set: gpu_mesh')
+    elseif key == '4' then
+      DrawFunc = DrawSet.static_mesh
+      print('draw set: static_mesh')
+    end
+  else
+    local i = tonumber(key)
+    if i and ColorModes[i] then
+      ColorMode = i
+      print('ColorMode: '..ColorModes[i])
+    end
+  end
+end
+
+
+function DrawSet.default(pass)
   pass:transform(vec3(0, 0, -3))
   pass:setColor(0.4, 0.4, 0.4)
   pass:line(vec3(-10, 0, 0), vec3(10, 0, 0))
@@ -250,13 +289,140 @@ function lovr.draw(pass)
       pass:draw(mesh_info[1])
     end
   end
+
+  local gpoints = {
+    { 1, 0.5, 3 },
+    { -1, 0.5, 3 },
+    { -1, 1.5, 3 },
+    { -1, 1.5, 4 },
+    { 0, 1, 3 },
+    { -0.5, 1.5, 4 },
+  }
+  local gline1 = LineMesh.gpu_build(pass, gpoints, 0.1, 8, {
+    colors = {
+      { 1, 0, 0, 1 },
+      { 0, 1, 0, 1 },
+      { 0, 0, 1, 1 },
+      { 0, 1, 1, 1 },
+      { 1, 1, 0, 1 },
+      { 1, 0, 1, 1 },
+    }
+  })
+  pass:mesh(gline1.vertex_buffer, gline1.index_buffer, { 0, 0, 0 })
+
+  local gline2 = LineMesh.gpu_build(pass, gpoints, 0.1, 8, {
+    colors = {
+      { 1, 0, 0, 1 },
+      { 0, 1, 0, 1 },
+      { 0, 0, 1, 1 },
+      { 0, 1, 1, 1 },
+      { 1, 1, 0, 1 },
+      { 1, 0, 1, 1 },
+    },
+    widths = { 0.2, 2, 2.5, 1.5, 1.0, 0.8 }
+  })
+  pass:mesh(gline2.vertex_buffer, gline2.index_buffer, { 0, 2, 0 })
 end
 
--- change color mode by 1 - #ColorModes
-function lovr.keypressed(key)
-  local i = tonumber(key)
-  if i and ColorModes[i] then
-    ColorMode = i
-    print('ColorMode: '..ColorModes[i])
+local function gen_points(dir, n)
+  local r = {}
+  for i = 1, n do
+    local l = i * 0.5
+    r[#r + 1] = {
+      dir[1] * l,
+      dir[2] * l,
+      dir[3] * l
+    }
+  end
+  return r
+end
+
+local TestLinesN = 32
+local Lines = {}
+for i = 1, TestLinesN do
+  local angle = i / TestLinesN * math.pi * 2
+  local x, z = math.cos(angle), math.sin(angle)
+  local points = gen_points({ x, 0, z }, 300)
+
+  Lines[i] = {
+    raw_points = points,
+    points = nil
+  }
+end
+
+local function update_test_lines()
+  for i, line in ipairs(Lines) do
+    local ps = line.points
+    if not ps then
+      ps = {}
+      line.points = ps
+      for j, p in ipairs(line.raw_points) do
+        ps[j] = { p[1], p[2], p[3] }
+      end
+    end
+    for j, p in ipairs(line.raw_points) do
+      ps[j][2] = p[2] + math.sin(time + i + j) * 0.5
+    end
+  end
+end
+
+function DrawSet.cpu_mesh(pass)
+  local fps = lovr.timer.getFPS()
+  pass:text('FPS: '..fps, { 0, 2, 0})
+  pass:line({ -10, 0, 0 }, { 10, 0, 0 })
+  pass:line({ 0, 0, -10 }, { 0, 0, 10 })
+
+  update_test_lines()
+  for i, line in ipairs(Lines) do
+    local vlist, ilist, len, vtotal, itotal = LineMesh.build(
+      line.points, 0.1, 8, { output_type = 'cdata' }
+    )
+
+    local mesh = line.mesh or lovr.graphics.newMesh({
+      { name = 'VertexPosition', type = 'vec3' },
+      { name = 'VertexNormal', type = 'vec3' },
+      { name = 'VertexUV', type = 'vec2' },
+      { name = 'VertexColor', type = 'vec4' },
+    }, vtotal)
+    line.mesh = mesh
+    local blob = line.blob or lovr.data.newBlob(vtotal * 12 * 4)
+    line.blob = blob
+
+    local ptr = blob:getPointer()
+    ffi.copy(ptr, vlist, vtotal * 12 * 4)
+    mesh:setVertices(blob)
+    ffi.copy(ptr, ilist, itotal * 4)
+    mesh:setIndices(blob, 'u32')
+    pass:draw(mesh)
+  end
+end
+
+function DrawSet.gpu_mesh(pass)
+  local fps = lovr.timer.getFPS()
+  pass:text('FPS: '..fps, { 0, 2, 0})
+  pass:line({ -10, 0, 0 }, { 10, 0, 0 })
+  pass:line({ 0, 0, -10 }, { 0, 0, 10 })
+
+  update_test_lines()
+  for i, line in ipairs(Lines) do
+    line.gpu_data = LineMesh.gpu_build(pass, line.points, 0.1, 8, nil, line.gpu_data)
+    pass:mesh(line.gpu_data.vertex_buffer, line.gpu_data.index_buffer)
+  end
+end
+
+function DrawSet.static_mesh(pass)
+  local fps = lovr.timer.getFPS()
+  pass:text('FPS: '..fps, { 0, 2, 0})
+  pass:line({ -10, 0, 0 }, { 10, 0, 0 })
+  pass:line({ 0, 0, -10 }, { 0, 0, 10 })
+
+  if not Lines[1].points then
+    update_test_lines()
+  end
+  for i, line in ipairs(Lines) do
+    if not line.gpu_data then
+      line.gpu_data = LineMesh.gpu_build(pass, line.points, 0.1, 8, nil, line.gpu_data)
+    end
+    pass:mesh(line.gpu_data.vertex_buffer, line.gpu_data.index_buffer)
   end
 end

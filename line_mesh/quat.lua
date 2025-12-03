@@ -6,12 +6,17 @@ else
   Vec3 = require(mdir..'.vec3')
 end
 
+local Sqrt = math.sqrt
+local Cos, Sin = math.cos, math.sin
+local ACos = math.acos
+local PI = math.pi
+
 local Quat = {}
 Quat.__index = Quat
 
 local function FromAngleAxis(angle, ax, ay, az)
-  local s, c = math.sin(angle * .5), math.cos(angle * .5)
-  local length = (ax * ax + ay * ay + az * az) ^ .5
+  local s, c = Sin(angle * .5), Cos(angle * .5)
+  local length = Sqrt(ax * ax + ay * ay + az * az)
   if length > 0 then s = s / length end
   return ax * s, ay * s, az * s, c
 end
@@ -23,14 +28,14 @@ local function QuatBetweenVec3(u, v)
   elseif dot < -0.99999999 then
     local axis = Vec3.cross({ 1, 0, 0 }, u)
     if Vec3.length(axis) < 0.00000001 then axis = Vec3.cross({ 0, 1, 0 }, u) end
-    return FromAngleAxis(math.pi, axis[1], axis[2], axis[3])
+    return FromAngleAxis(PI, axis[1], axis[2], axis[3])
   else
     local x, y, z =
       u[2] * v[3] - u[3] * v[2],
       u[3] * v[1] - u[1] * v[3],
       u[1] * v[2] - u[2] * v[1]
     local w = 1 + dot
-    local length = (x * x + y * y + z * z + w * w) ^ .5
+    local length = Sqrt(x * x + y * y + z * z + w * w)
     if length == 0 then
       return x, y, z, w
     else
@@ -77,7 +82,7 @@ end
 function Quat.direction(q)
   local x = -2 * q[1] * q[3] - 2 * q[4] * q[2]
   local y = -2 * q[2] * q[3] + 2 * q[4] * q[1]
-  local z = -1 + 2 * q[3] * q[1] + 2 * q[2] * q[2]
+  local z = -1 + 2 * q[1] * q[1] + 2 * q[2] * q[2]
   return Vec3.raw_new(x, y, z)
 end
 
@@ -90,7 +95,7 @@ function Quat.clone(q)
 end
 
 function Quat.length(q)
-  return (q[1] * q[1] + q[2] * q[2] + q[3] * q[3] + q[4] * q[4]) ^ .5
+  return Sqrt(q[1] * q[1] + q[2] * q[2] + q[3] * q[3] + q[4] * q[4])
 end
 
 function Quat.to_angle_axis(q)
@@ -100,9 +105,9 @@ function Quat.to_angle_axis(q)
     x, y, z, w = x / length, y / length, z / length, w / length
   end
 
-  local s = math.sqrt(1 - w * w)
+  local s = Sqrt(1 - w * w)
   if s < .0001 then s = 1 else s = 1 / s end
-  return 2 * math.acos(w), x * s, y * s, z * s
+  return 2 * ACos(w), x * s, y * s, z * s
 end
 
 local function quat_mul(a, b)

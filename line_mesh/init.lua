@@ -14,6 +14,15 @@ if lovr then
   LQuat = Quat
 end
 
+local Abs = math.abs
+local Cos, Sin = math.cos, math.sin
+local ACos = math.acos
+local PI = math.pi
+
+local ComputeSize = 64
+local ComputeShader
+local BishopFrame
+
 local Vec3, Quat
 if _VERSION == 'Luau' then
   Vec3 = require('./line_mesh/vec3')
@@ -22,6 +31,13 @@ else
   local mdir = (...):gsub("%.init$", '')
   Vec3 = require(mdir..'.vec3')
   Quat = require(mdir..'.quat')
+
+  if lovr then
+    local glsl_path = mdir:gsub('%.', '/')..'/mesh.glsl'
+    local glsl_code = lovr.filesystem.read(glsl_path):gsub('COMPUTE_SIZE', ComputeSize)
+    ComputeShader = lovr.graphics.newShader(glsl_code)
+    BishopFrame = require(mdir..'.bishop_frame')
+  end
 end
 
 -- for debug
@@ -59,14 +75,17 @@ local DefaultSeg = 5
 local DefaultOpts = {}
 local DefaultColor = { 1, 1, 1, 1 }
 
--- points: { { x, y, z }, p2, p3, ... }
--- opts.colors: { { r, g, b, a or 1 }, ... }, points colors, 1-1 map
--- opts.widths: { w1, w2, w3, ... }, points widths, 1-1 map
--- opts.closed: bool, link first point & last point. TODO impl
--- opts.output_type: optional, table or cdata, default is table. cdata pre vertex has 12 float numbers
--- opts.smooth: optional, default is true.
--- return vlist{{ x, y, z, nx, ny, nz, u, v, r, g, b, a }, ...}, ilist, line_len, vtotal, itotal
--- return vlist_float[vtotal*12], ilist_int[itotal], line_len, vtotal, itotal
+--[[
+points: { { x, y, z }, p2, p3, ... }
+opts.colors: { { r, g, b, a or 1 }, ... }, points colors, 1-1 map
+opts.widths: { w1, w2, w3, ... }, points widths, 1-1 map
+opts.closed: bool, link first point & last point. TODO impl
+opts.output_type: optional, table or cdata, default is table. cdata pre vertex has 12 float numbers
+opts.smooth: optional, default is true.
+
+return vlist{{ x, y, z, nx, ny, nz, u, v, r, g, b, a }, ...}, ilist, line_len, vtotal, itotal
+return vlist_float[vtotal*12], ilist_int[itotal], line_len, vtotal, itotal
+]]
 function M.build(_points, width, seg, opts)
   assert(#_points >= 2, 'points must >= 2')
   width = width or 0.1
@@ -103,8 +122,8 @@ function M.build(_points, width, seg, opts)
 
   local base_ps = {}
   for i = 1, seg do
-    local phi = i / seg * math.pi * 2
-    local x, y = math.sin(phi), math.cos(phi)
+    local phi = i / seg * PI * 2
+    local x, y = Sin(phi), Cos(phi)
     base_ps[#base_ps + 1] = Vec3.raw_new(x, y, 0)
   end
 
@@ -200,6 +219,127 @@ function M.build(_points, width, seg, opts)
   return vlist, ilist, line_len, vtotal, itotal
 end
 
+local NewBuffer = lovr and lovr.graphics.newBuffer
+--[[
+build by compute shader, auto update buffer
+result = gpu_build(points, opts, last_result)
+
+points: { { x, y, z }, p2, p3, ... }
+width: default is 0.1
+segments: default is 8
+opts.colors: { { r, g, b, a or 1 }, ... }, points colors, 1-1 map
+opts.widths: { w1, w2, w3, ... }, points widths, 1-1 map, multiple width
+last_result: optional, automatic management and reuse buffers
+
+return { vertex_buffer = vertex_buffer, index_buffer = index_buffer }
+]]
+local DefaultGpuBuildOpts = { }
+function M.gpu_build(pass, _points, width, segments, opts, last_result)
+  assert(lovr, 'GPU build require Lovr env')
+  assert(#_points >= 2, 'points must >= 2')
+
+  segments = segments or 8
+  assert(segments >= 3, 'segments must >= 3')
+
+  opts = opts or DefaultGpuBuildOpts
+  width = width or 0.1
+  local colors = opts.colors
+  local widths = opts.widths
+
+  local points = {}
+  for i, p in ipairs(_points) do
+    points[i] = Vec3.raw_new(p[1], p[2],  p[3])
+  end
+
+  local ret = last_result or {}
+  local bfdata = BishopFrame.calc(points)
+
+  local input_buffer = ret.input_buffer
+  if not input_buffer or input_buffer:getLength() < #bfdata then
+    local input_format = ComputeShader:getBufferFormat('InputBuffer')
+    input_buffer = NewBuffer(input_format, #bfdata)
+  end
+
+  local input_ptr = ffi.cast('float*', input_buffer:mapData())
+  for i, v in ipairs(bfdata) do
+    local r = (widths and widths[i] or 1) * width * 0.5
+    local color = colors and colors[i] or DefaultColor
+    local idx = (i - 1) * 16
+    local pos, normal, binormal, mscale, dist = v[1], v[2], v[3], v[4], v[5]
+    input_ptr[idx], input_ptr[idx + 1], input_ptr[idx + 2] = pos[1], pos[2], pos[3]
+    input_ptr[idx + 3] = r
+    input_ptr[idx + 4], input_ptr[idx + 5], input_ptr[idx + 6] = normal[1], normal[2], normal[3]
+    input_ptr[idx + 7] = dist
+    input_ptr[idx + 8], input_ptr[idx + 9], input_ptr[idx + 10] = binormal[1], binormal[2], binormal[3]
+    input_ptr[idx + 11] = mscale
+    input_ptr[idx + 12], input_ptr[idx + 13], input_ptr[idx + 14] = color[1], color[2], color[3]
+    input_ptr[idx + 15] = color[4] or 1
+
+    -- input_ptr[i] = {
+    --   { v.pos[1], v.pos[2], v.pos[3], r },
+    --   { v.normal[1], v.normal[2], v.normal[3], v.dist },
+    --   { v.binormal[1], v.binormal[2], v.binormal[3], v.scale },
+    --   color,
+    -- }
+  end
+  -- local input_buffer = ret.input_buffer
+  -- if not input_buffer or input_buffer:getLength() < #input_data then
+  --   input_buffer = NewBuffer(input_format, input_data)
+  -- else
+  --   input_buffer:setData(input_data)
+  -- end
+
+  local vcount = #points * segments
+  local vertex_buffer = ret.vertex_buffer
+  if not vertex_buffer or vertex_buffer:getLength() < vcount then
+    local vertex_format = ComputeShader:getBufferFormat('VertexBuffer')
+    vertex_buffer = NewBuffer(vertex_format, vcount)
+  end
+  local icount_path = (#points - 1) * segments * 6
+  -- path + close poly
+  local icount = icount_path + (segments - 2) * 3 * 2
+  local index_buffer = ret.index_buffer
+  if not index_buffer or index_buffer:getLength() < icount then
+    local index_format = ComputeShader:getBufferFormat('IndexBuffer')
+    index_buffer = NewBuffer(index_format, icount)
+  end
+
+  if ret.points_count ~= #points or ret.segments ~= segments then
+    local edge_index = {}
+    local end_si = vcount - segments
+    for i = 3, segments do
+      edge_index[#edge_index + 1] = 0
+      edge_index[#edge_index + 1] = i - 1
+      edge_index[#edge_index + 1] = i - 2
+
+      edge_index[#edge_index + 1] = end_si
+      edge_index[#edge_index + 1] = end_si + i - 2
+      edge_index[#edge_index + 1] = end_si + i - 1
+    end
+    index_buffer:setData(edge_index, icount_path + 1)
+  end
+
+  pass:push('state')
+  pass:setShader(ComputeShader)
+  pass:send('InputBuffer', input_buffer)
+  pass:send('VertexBuffer', vertex_buffer)
+  pass:send('IndexBuffer', index_buffer)
+  pass:send('NodesCount', #points)
+  pass:send('Segments', segments)
+  pass:send('GlobalRadius', 1)
+  local n = math.ceil(#points / 64)
+  pass:compute(n)
+  pass:pop('state')
+
+  ret.input_buffer = input_buffer
+  ret.vertex_buffer = vertex_buffer
+  ret.index_buffer = index_buffer
+  ret.points_count = #points
+  ret.segments = segments
+
+  return ret
+end
+
 -- The predicted result >= the final output size
 -- return total_vertices, total_indexes
 function M.predirect_output_size(points, seg)
@@ -251,8 +391,8 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, gdata)
   local dir_v123 = dir21:clone():cross(dir23):normalize()
   local dir_mid_side
   local dir_mid
-  if math.abs(line_dot) > 0.99999 then
-    if math.abs(dir21:dot(Vec3.raw_new(0, 1, 0))) > 0.1 then
+  if Abs(line_dot) > 0.99999 then
+    if Abs(dir21:dot(Vec3.raw_new(0, 1, 0))) > 0.1 then
       dir_mid = Vec3.raw_new(0, 1, 0):cross(dir21):normalize()
     else
       dir_mid = Vec3.raw_new(1, 0, 0):cross(dir21):normalize()
@@ -264,8 +404,8 @@ function M._gen_3p_data(pidx, p1, p2, p3, pinfo, gdata)
   end
 
 
-  local angle = math.acos(line_dot)
-  local inner_ov = pinfo.radius / math.sin(angle * 0.5)
+  local angle = ACos(line_dot)
+  local inner_ov = pinfo.radius / Sin(angle * 0.5)
 
   -- local p_inner = p2 + dir_mid * inner_ov
   -- M.debug_draw('setColor', 0.8, 0.8, 0)
@@ -738,7 +878,7 @@ local DBL_EPSILON = 2.2204460492503131e-16
 function M._ray_plane(ray_pos, ray_dir, plane_pos, plane_normal)
   local denom = plane_normal:dot(ray_dir)
   -- ray does not intersect plane
-  if math.abs(denom) < DBL_EPSILON then
+  if Abs(denom) < DBL_EPSILON then
     return false
   end
   -- distance of direction

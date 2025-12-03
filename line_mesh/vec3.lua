@@ -1,6 +1,9 @@
 local Vec3 = {}
 Vec3.__index = Vec3
 
+local Sqrt = math.sqrt
+local Cos, Sin = math.cos, math.sin
+
 local function raw_new_vec3(x, y, z)
   local v = setmetatable({ x, y, z }, Vec3)
   return v
@@ -79,12 +82,16 @@ function Vec3.div(a, x, y, z)
 end
 
 function Vec3.length(a)
-  return (a[1] * a[1] + a[2] * a[2] + a[3] * a[3]) ^ 0.5
+  return Sqrt(a[1] * a[1] + a[2] * a[2] + a[3] * a[3])
+end
+
+function Vec3.length2(a)
+  return a[1] * a[1] + a[2] * a[2] + a[3] * a[3]
 end
 
 function Vec3.distance(a, b)
   local x, y, z = a[1] - b[1], a[2] - b[2], a[3] - b[3]
-  return (x * x + y * y + z * z) ^ 0.5
+  return Sqrt(x * x + y * y + z * z)
 end
 
 function Vec3.normalize(a)
@@ -116,6 +123,21 @@ function Vec3.cross(a, x, y, z)
       a[1] * x[2] - a[2] * x[1]
   end
   return a
+end
+
+function Vec3.rotate(v, axis, angle)
+  local k = axis:normalize()
+  local cosA = Cos(angle)
+  local sinA = Sin(angle)
+
+  -- v * cosA
+  local term1 = v * cosA
+  -- (k x v) * sinA
+  local term2 = Vec3(k):cross(v):mul(sinA)
+  -- k * (k . v) * (1 - cosA)
+  local term3 = (k * (k:dot(v))):mul(1 - cosA)
+
+  return term1:add(term2):add(term3)
 end
 
 function Vec3.clone(a)
