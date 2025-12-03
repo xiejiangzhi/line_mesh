@@ -26,7 +26,7 @@ Supported lua version: `luajit`, `lua` 5.1 - 5.4, `luau`(Currently used for expe
 ```lua
 local points = { { 1, 0, 0 }, { 1, 1, 1 }, { 1, 0, 1 } }
 local width = 0.1
-local seg = 8
+local seg = 8 -- Generate by CPU, adding segments has a significant impact on performance.
 -- vlist: { { x, y, z, nx, ny, nz, u, v, r, g, b, a }, ... }
 local vlist, ilist, len = LineMesh.build(points, { widths = width, seg)
 
@@ -40,7 +40,7 @@ local vlist, ilist, len = LineMesh.build(points, width, seg, {
   closed = true,
 })
 
--- Generate by GPU
+-- Generate by GPU, adding segments has almost no impact on performance.
 local gpu_line = LineMesh.gpu_build(pass, points, width, seg, {
   colors = { { r, g, b, a }, p2_rgb_or_rags, p3_rgba },
   widths = { 0.1, 0.2, 0.1 }
