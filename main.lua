@@ -337,12 +337,12 @@ local function gen_points(dir, n)
   return r
 end
 
-local TestLinesN = 32
+local TestLinesN = 128
 local Lines = {}
 for i = 1, TestLinesN do
   local angle = i / TestLinesN * math.pi * 2
   local x, z = math.cos(angle), math.sin(angle)
-  local points = gen_points({ x, 0, z }, 300)
+  local points = gen_points({ x, 0, z }, 100)
 
   Lines[i] = {
     raw_points = points,
