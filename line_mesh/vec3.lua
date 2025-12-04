@@ -169,15 +169,6 @@ function Vec3.cross_num(a, x, y, z)
     a[1] * y - a[2] * x
 end
 
--- Vec3.cross(x, y, z, x2, y2, z3)
--- return x, y, z
-function Vec3.cross_num2(x, y, z, x2, y2, z2)
-  return
-    y * z2 - z * y2,
-    z * x2 - x * z2,
-    x * y2 - y * x2
-end
-
 function Vec3.rotate(v, axis, angle)
   local k = axis:normalize()
   local cosA = Cos(angle)
@@ -202,6 +193,10 @@ end
 
 function Vec3.clone(a)
   return raw_new_vec3(a[1], a[2], a[3])
+end
+
+function Vec3.unpack(a)
+  return a[1], a[2], a[3]
 end
 
 function Vec3.__add(a, b)
