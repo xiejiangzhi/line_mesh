@@ -45,7 +45,7 @@ local gpu_line = LineMesh.gpu_build(pass, points, width, seg, {
   colors = { { r, g, b, a }, p2_rgb_or_rags, p3_rgba },
   widths = { 0.1, 0.2, 0.1 }
 })
-pass:mesh(gpu_line.vertex_buffer, gpu_line.index_buffer)
+pass:draw(gpu_line.mesh)
 ```
 
 

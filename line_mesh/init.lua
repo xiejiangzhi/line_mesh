@@ -19,7 +19,7 @@ local Cos, Sin = math.cos, math.sin
 local ACos = math.acos
 local PI = math.pi
 
-local ComputeSize = 64
+local ComputeGroupSize = 128
 local ComputeShader
 local BishopFrame
 
@@ -34,7 +34,7 @@ else
 
   if lovr then
     local glsl_path = mdir:gsub('%.', '/')..'/mesh.glsl'
-    local glsl_code = lovr.filesystem.read(glsl_path):gsub('COMPUTE_SIZE', ComputeSize)
+    local glsl_code = lovr.filesystem.read(glsl_path):gsub('COMPUTE_SIZE', ComputeGroupSize)
     ComputeShader = lovr.graphics.newShader(glsl_code)
     BishopFrame = require(mdir..'.bishop_frame')
   end
@@ -162,7 +162,7 @@ function M.build(_points, width, seg, opts)
       plen = plen + p1:distance(p2)
     end
     pinfo.idx = i
-    pinfo.radius = (widths and widths[i] or width) * 0.5
+    pinfo.radius = (widths and widths[i] or 1) * 0.5 * width
     pinfo.plen = plen / line_len
     pinfo.color = colors and colors[i] or DefaultColor
 
@@ -231,7 +231,12 @@ opts.colors: { { r, g, b, a or 1 }, ... }, points colors, 1-1 map
 opts.widths: { w1, w2, w3, ... }, points widths, 1-1 map, multiple width
 last_result: optional, automatic management and reuse buffers
 
-return { vertex_buffer = vertex_buffer, index_buffer = index_buffer }
+return {
+  mesh = mesh,
+  vertex_buffer = vertex_buffer,
+  index_buffer = index_buffer,
+  vcount = n, icount = m, segments = s
+}
 ]]
 local DefaultGpuBuildOpts = { }
 function M.gpu_build(pass, _points, width, segments, opts, last_result)
@@ -258,6 +263,7 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
   if not input_buffer or input_buffer:getLength() < #bfdata then
     local input_format = ComputeShader:getBufferFormat('InputBuffer')
     input_buffer = NewBuffer(input_format, #bfdata)
+    ret.input_buffer = input_buffer
   end
 
   local input_ptr = ffi.cast('float*', input_buffer:mapData())
@@ -289,11 +295,15 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
   --   input_buffer:setData(input_data)
   -- end
 
+  local mesh = ret.mesh
   local vcount = #points * segments
   local vertex_buffer = ret.vertex_buffer
   if not vertex_buffer or vertex_buffer:getLength() < vcount then
     local vertex_format = ComputeShader:getBufferFormat('VertexBuffer')
     vertex_buffer = NewBuffer(vertex_format, vcount)
+    ret.vertex_buffer = vertex_buffer
+    mesh = lovr.graphics.newMesh(vertex_buffer)
+    ret.mesh = mesh
   end
   local icount_path = (#points - 1) * segments * 6
   -- path + close poly
@@ -302,9 +312,13 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
   if not index_buffer or index_buffer:getLength() < icount then
     local index_format = ComputeShader:getBufferFormat('IndexBuffer')
     index_buffer = NewBuffer(index_format, icount)
+    ret.index_buffer = index_buffer
+    mesh:setIndexBuffer(index_buffer)
   end
 
   if ret.points_count ~= #points or ret.segments ~= segments then
+    ret.vcount = vcount
+    ret.icount = icount
     local edge_index = {}
     local end_si = vcount - segments
     for i = 3, segments do
@@ -317,6 +331,7 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
       edge_index[#edge_index + 1] = end_si + i - 1
     end
     index_buffer:setData(edge_index, icount_path + 1)
+    mesh:setDrawRange(1, icount)
   end
 
   pass:push('state')
@@ -331,9 +346,12 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
   pass:compute(n)
   pass:pop('state')
 
-  ret.input_buffer = input_buffer
-  ret.vertex_buffer = vertex_buffer
-  ret.index_buffer = index_buffer
+  if not mesh then
+    mesh = lovr.graphics.newMesh(vertex_buffer)
+    mesh:setIndexBuffer(index_buffer)
+    ret.mesh = mesh
+  end
+
   ret.points_count = #points
   ret.segments = segments
 

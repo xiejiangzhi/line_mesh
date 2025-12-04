@@ -308,7 +308,7 @@ function DrawSet.default(pass)
       { 1, 0, 1, 1 },
     }
   })
-  pass:mesh(gline1.vertex_buffer, gline1.index_buffer, { 0, 0, 0 })
+  pass:draw(gline1.mesh, { 0, 0, 0 })
 
   local gline2 = LineMesh.gpu_build(pass, gpoints, 0.1, 16, {
     colors = {
@@ -321,13 +321,13 @@ function DrawSet.default(pass)
     },
     widths = { 0.2, 2, 2.5, 1.5, 1.0, 0.8 }
   })
-  pass:mesh(gline2.vertex_buffer, gline2.index_buffer, { 0, 2, 0 })
+  pass:draw(gline2.mesh, { 0, 2, 0 })
 end
 
 local function gen_points(dir, n)
   local r = {}
   for i = 1, n do
-    local l = i * 0.5
+    local l = i * 0.2
     r[#r + 1] = {
       dir[1] * l,
       dir[2] * l,
@@ -356,13 +356,21 @@ local function update_test_lines()
     local ps = line.points
     if not ps then
       ps = {}
+      local colors = {}
+      local widths = {}
+
       line.points = ps
+      line.colors = colors
+      line.widths = widths
       for j, p in ipairs(line.raw_points) do
         ps[j] = { p[1], p[2], p[3] }
+        colors[j] = { math.random(), math.random(), math.random(), 1 }
+        widths[j] = 0.5 + math.abs(math.sin(i + j * 0.2))
       end
     end
+
     for j, p in ipairs(line.raw_points) do
-      ps[j][2] = p[2] + math.sin(time + i + j) * 0.5
+      ps[j][2] = p[2] + math.sin(time + i + j * 0.2) * 0.2
     end
   end
 end
@@ -376,7 +384,9 @@ function DrawSet.cpu_mesh(pass)
   update_test_lines()
   for i, line in ipairs(Lines) do
     local vlist, ilist, len, vtotal, itotal = LineMesh.build(
-      line.points, 0.1, TestLineSegments, { output_type = 'cdata' }
+      line.points, 0.1, TestLineSegments, {
+        output_type = 'cdata', colors = line.colors, widths = line.widths
+      }
     )
 
     local mesh = line.mesh or lovr.graphics.newMesh({
@@ -406,8 +416,10 @@ function DrawSet.gpu_mesh(pass)
 
   update_test_lines()
   for i, line in ipairs(Lines) do
-    line.gpu_data = LineMesh.gpu_build(pass, line.points, 0.1, TestLineSegments, nil, line.gpu_data)
-    pass:mesh(line.gpu_data.vertex_buffer, line.gpu_data.index_buffer)
+    line.gpu_data = LineMesh.gpu_build(pass, line.points, 0.1, TestLineSegments, {
+      colors = line.colors, widths = line.widths
+    }, line.gpu_data)
+    pass:draw(line.gpu_data.mesh)
   end
 end
 
@@ -422,8 +434,10 @@ function DrawSet.static_mesh(pass)
   end
   for i, line in ipairs(Lines) do
     if not line.gpu_data then
-      line.gpu_data = LineMesh.gpu_build(pass, line.points, 0.1, TestLineSegments, nil, line.gpu_data)
+      line.gpu_data = LineMesh.gpu_build(pass, line.points, 0.1, TestLineSegments, {
+        colors = line.colors, widths = line.widths
+      }, line.gpu_data)
     end
-    pass:mesh(line.gpu_data.vertex_buffer, line.gpu_data.index_buffer)
+    pass:draw(line.gpu_data.mesh)
   end
 end

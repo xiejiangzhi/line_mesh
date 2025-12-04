@@ -38,7 +38,6 @@ function M.calc(points)
   local frames = {}
   for i = 1, count do
     local tIn, tOut
-
     if i == 1 then
       tIn = tangents[1]
       tOut = tangents[1]
