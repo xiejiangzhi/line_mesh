@@ -13,7 +13,7 @@ Supported lua version: `luajit`, `lua` 5.1 - 5.4, `luau`(Currently used for expe
 * Support for setting color and radius for each point
 * Support for closed paths
 * Support UV
-* Support generate mesh data by GPU(4.2x faster)
+* Support generate mesh data by GPU(8x faster)
 
 
 **TODO**:

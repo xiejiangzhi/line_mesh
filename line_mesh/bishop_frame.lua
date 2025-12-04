@@ -1,12 +1,9 @@
 local M = {}
 
-local Vec3
-if _VERSION == 'Luau' then
-  Vec3 = require('./vec3')
-else
-  local mdir = (...):gsub("%.[%w_]+$", '')
-  Vec3 = require(mdir..'.vec3')
-end
+local mdir = (...):gsub("%.[%w_]+$", '')
+local Vec3 = require(mdir..'.vec3')
+
+local ffi = require 'ffi'
 
 local Abs, Min, Max = math.abs, math.min, math.max
 local Sqrt = math.sqrt
@@ -47,6 +44,7 @@ local function Vec3Rotate(x, y, z, ax, ay, az, angle)
 end
 
 --[[
+out_ptr: optional, cdata float[#points * 11]
 return {
   {
     x, y, z,
@@ -58,12 +56,20 @@ return {
    ...
 }
 ]]
-function M.calc(points)
+local TmpTangents, TmpTangentsLen
+function M.calc(points, out_ptr)
   local count = #points
   assert(count >= 2, 'Total points must >= 2')
 
   -- tangents
-  local ts_x, ts_y, ts_z = {}, {}, {}
+  local tangents
+  if TmpTangentsLen and TmpTangentsLen > count then
+    tangents = TmpTangents
+  else
+    TmpTangents = ffi.new('double[?]', count * 3)
+    TmpTangentsLen = count
+    tangents = TmpTangents
+  end
   for i = 1, count do
     local p = points[i]
     local p2
@@ -73,10 +79,13 @@ function M.calc(points)
       p2 = p
       p = points[i - 1]
     end
-    ts_x[i], ts_y[i], ts_z[i] = NormalizeNum(p2[1] - p[1], p2[2] - p[2],  p2[3] - p[3])
+    local idx = (i - 1) * 3
+    tangents[idx], tangents[idx + 1], tangents[idx + 2] = NormalizeNum(
+      p2[1] - p[1], p2[2] - p[2],  p2[3] - p[3]
+    )
   end
 
-  local t0x, t0y, t0z = ts_x[1], ts_y[1], ts_z[1]
+  local t0x, t0y, t0z = tangents[0], tangents[1], tangents[2]
   local cnx, cny, cnz
   if Abs(Dot(t0x, t0y, t0z, 0, 1, 0)) > 0.99 then
     cnx, cny, cnz = NormalizeNum(Cross(t0x, t0y, t0z, 1, 0, 0))
@@ -85,21 +94,23 @@ function M.calc(points)
   end
   local dist = 0
 
-  local frames = {}
+  local frames_data = out_ptr or ffi.new('float[?]', count * 11)
+  local ptr = frames_data
   for i = 1, count do
     local tin_x, tin_y, tin_z
     local tout_x, tout_y, tout_z
     if i == 1 then
-      tin_x, tin_y, tin_z = ts_x[1], ts_y[1], ts_z[1]
+      tin_x, tin_y, tin_z = tangents[0], tangents[1], tangents[2]
       tout_x, tout_y, tout_z = tin_x, tin_y, tin_z
     elseif i == count then
-      local idx = count - 1
-      tin_x, tin_y, tin_z = ts_x[idx], ts_y[idx], ts_z[idx]
+      local idx = (count - 2) * 3
+      tin_x, tin_y, tin_z = tangents[idx], tangents[idx + 1], tangents[idx + 2]
       tout_x, tout_y, tout_z = tin_x, tin_y, tin_z
     else
-      local idx_in = i - 1
-      tin_x, tin_y, tin_z = ts_x[idx_in], ts_y[idx_in], ts_z[idx_in]
-      tout_x, tout_y, tout_z = ts_x[i], ts_y[i], ts_z[i]
+      local idx_in = (i - 2) * 3
+      tin_x, tin_y, tin_z = tangents[idx_in], tangents[idx_in + 1], tangents[idx_in + 2]
+      local idx_out = (i - 1) * 3
+      tout_x, tout_y, tout_z = tangents[idx_out], tangents[idx_out + 1], tangents[idx_out + 2]
     end
     local point = points[i]
 
@@ -140,16 +151,14 @@ function M.calc(points)
       nx, ny, nz = NormalizeNum(Cross(bnx, bny, bnz, tcx, tcy, tcz))
     end
 
-    frames[i] = {
-      point[1], point[2], point[3],
-      nx, ny, nz,
-      bnx, bny, bnz,
-      miterScale,
-      dist
-    }
+    ptr[0], ptr[1], ptr[2] = point[1], point[2], point[3]
+    ptr[3], ptr[4], ptr[5] = nx, ny, nz
+    ptr[6], ptr[7], ptr[8] = bnx, bny, bnz
+    ptr[9], ptr[10] = miterScale, dist
+    ptr = ptr + 11
   end
 
-  return frames
+  return frames_data
 end
 
 return M

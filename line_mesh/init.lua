@@ -257,29 +257,31 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
   end
 
   local ret = last_result or {}
-  local bfdata = BishopFrame.calc(points)
 
   local input_buffer = ret.input_buffer
-  if not input_buffer or input_buffer:getLength() < #bfdata then
+  if not input_buffer or input_buffer:getLength() < #points then
     local input_format = ComputeShader:getBufferFormat('InputBuffer')
-    input_buffer = NewBuffer(input_format, #bfdata)
+    input_buffer = NewBuffer(input_format, #points)
     ret.input_buffer = input_buffer
   end
 
+  ret.bfdata = BishopFrame.calc(points, ret.pcount == #points and ret.bf_data or nil)
+  local bfdata = ret.bfdata
   local input_ptr = ffi.cast('float*', input_buffer:mapData())
-  for i, v in ipairs(bfdata) do
+  for i = 1, #points do
     local r = (widths and widths[i] or 1) * width * 0.5
     local color = colors and colors[i] or DefaultColor
-    local miter_scale, dist = v[10], v[11]
+    local v = bfdata + (i - 1) * 11
+    local miter_scale, dist = v[9], v[10]
 
     -- pos, r
-    input_ptr[0], input_ptr[1], input_ptr[2] = v[1], v[2], v[3]
+    input_ptr[0], input_ptr[1], input_ptr[2] = v[0], v[1], v[2]
     input_ptr[3] = r
     -- normal, dist
-    input_ptr[4], input_ptr[5], input_ptr[6] = v[4], v[5], v[6]
+    input_ptr[4], input_ptr[5], input_ptr[6] = v[3], v[4], v[5]
     input_ptr[7] = dist
     -- binormal, miter_scale
-    input_ptr[8], input_ptr[9], input_ptr[10] = v[7], v[8], v[9]
+    input_ptr[8], input_ptr[9], input_ptr[10] = v[6], v[7], v[8]
     input_ptr[11] = miter_scale
     -- color
     input_ptr[12], input_ptr[13], input_ptr[14] = color[1], color[2], color[3]
@@ -322,7 +324,7 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
     mesh:setIndexBuffer(index_buffer)
   end
 
-  if ret.points_count ~= #points or ret.segments ~= segments then
+  if ret.pcount ~= #points or ret.segments ~= segments then
     ret.vcount = vcount
     ret.icount = icount
     local edge_index = {}
@@ -358,7 +360,7 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
     ret.mesh = mesh
   end
 
-  ret.points_count = #points
+  ret.pcount = #points
   ret.segments = segments
 
   return ret
