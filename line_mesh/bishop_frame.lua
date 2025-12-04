@@ -44,16 +44,19 @@ local function Vec3Rotate(x, y, z, ax, ay, az, angle)
 end
 
 --[[
-out_ptr: optional, cdata float[#points * 11]
-return {
-  {
-    x, y, z,
-    tangent_x, tangent_y, tangent_z,
-    nrm_x, nrm_y, nrm_z,
-    binrm_x, binrm_y, bi_nrmz,
-    miter_scale, dist
-  },
-   ...
+out_ptr: optional, give last output data to reuse
+return float[#points * 11 + 1]
+  [0] = total_points,
+
+  -- frame1
+  x, y, z,
+  tangent_x, tangent_y, tangent_z,
+  nrm_x, nrm_y, nrm_z,
+  binrm_x, binrm_y, bi_nrmz,
+  miter_scale, dist
+
+  -- frame2
+  ...
 }
 ]]
 local TmpTangents, TmpTangentsLen
@@ -94,8 +97,14 @@ function M.calc(points, out_ptr)
   end
   local dist = 0
 
-  local frames_data = out_ptr or ffi.new('float[?]', count * 11)
-  local ptr = frames_data
+  local frames_data
+  if out_ptr and out_ptr[0] >= count then
+    frames_data = out_ptr
+  else
+    frames_data = ffi.new('float[?]', count * 11 + 1)
+    frames_data[0] = count
+  end
+  local ptr = frames_data + 1
   for i = 1, count do
     local tin_x, tin_y, tin_z
     local tout_x, tout_y, tout_z

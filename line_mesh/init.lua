@@ -265,29 +265,29 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
     ret.input_buffer = input_buffer
   end
 
-  ret.bfdata = BishopFrame.calc(points, ret.pcount == #points and ret.bf_data or nil)
-  local bfdata = ret.bfdata
+  ret.bfdata = BishopFrame.calc(points, ret.bfdata)
+  local bfdata = ret.bfdata + 1
   local input_ptr = ffi.cast('float*', input_buffer:mapData())
   for i = 1, #points do
     local r = (widths and widths[i] or 1) * width * 0.5
     local color = colors and colors[i] or DefaultColor
-    local v = bfdata + (i - 1) * 11
-    local miter_scale, dist = v[9], v[10]
+    local miter_scale, dist = bfdata[9], bfdata[10]
 
     -- pos, r
-    input_ptr[0], input_ptr[1], input_ptr[2] = v[0], v[1], v[2]
+    input_ptr[0], input_ptr[1], input_ptr[2] = bfdata[0], bfdata[1], bfdata[2]
     input_ptr[3] = r
     -- normal, dist
-    input_ptr[4], input_ptr[5], input_ptr[6] = v[3], v[4], v[5]
+    input_ptr[4], input_ptr[5], input_ptr[6] = bfdata[3], bfdata[4], bfdata[5]
     input_ptr[7] = dist
     -- binormal, miter_scale
-    input_ptr[8], input_ptr[9], input_ptr[10] = v[6], v[7], v[8]
+    input_ptr[8], input_ptr[9], input_ptr[10] = bfdata[6], bfdata[7], bfdata[8]
     input_ptr[11] = miter_scale
     -- color
     input_ptr[12], input_ptr[13], input_ptr[14] = color[1], color[2], color[3]
     input_ptr[15] = color[4] or 1
 
     input_ptr = input_ptr + 16
+    bfdata = bfdata + 11
 
     -- input_data[i] = {
     --   { v.pos[1], v.pos[2], v.pos[3], r },
