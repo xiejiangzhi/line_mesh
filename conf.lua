@@ -3,5 +3,5 @@ function lovr.conf(t)
   t.window.height = 800
   t.headset.drivers = { 'simulator' }
 
-  t.graphics.vsync = false
+  -- t.graphics.vsync = false
 end

@@ -270,18 +270,24 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
   for i, v in ipairs(bfdata) do
     local r = (widths and widths[i] or 1) * width * 0.5
     local color = colors and colors[i] or DefaultColor
-    local idx = (i - 1) * 16
-    local pos, normal, binormal, mscale, dist = v[1], v[2], v[3], v[4], v[5]
-    input_ptr[idx], input_ptr[idx + 1], input_ptr[idx + 2] = pos[1], pos[2], pos[3]
-    input_ptr[idx + 3] = r
-    input_ptr[idx + 4], input_ptr[idx + 5], input_ptr[idx + 6] = normal[1], normal[2], normal[3]
-    input_ptr[idx + 7] = dist
-    input_ptr[idx + 8], input_ptr[idx + 9], input_ptr[idx + 10] = binormal[1], binormal[2], binormal[3]
-    input_ptr[idx + 11] = mscale
-    input_ptr[idx + 12], input_ptr[idx + 13], input_ptr[idx + 14] = color[1], color[2], color[3]
-    input_ptr[idx + 15] = color[4] or 1
+    local miter_scale, dist = v[10], v[11]
 
-    -- input_ptr[i] = {
+    -- pos, r
+    input_ptr[0], input_ptr[1], input_ptr[2] = v[1], v[2], v[3]
+    input_ptr[3] = r
+    -- normal, dist
+    input_ptr[4], input_ptr[5], input_ptr[6] = v[4], v[5], v[6]
+    input_ptr[7] = dist
+    -- binormal, miter_scale
+    input_ptr[8], input_ptr[9], input_ptr[10] = v[7], v[8], v[9]
+    input_ptr[11] = miter_scale
+    -- color
+    input_ptr[12], input_ptr[13], input_ptr[14] = color[1], color[2], color[3]
+    input_ptr[15] = color[4] or 1
+
+    input_ptr = input_ptr + 16
+
+    -- input_data[i] = {
     --   { v.pos[1], v.pos[2], v.pos[3], r },
     --   { v.normal[1], v.normal[2], v.normal[3], v.dist },
     --   { v.binormal[1], v.binormal[2], v.binormal[3], v.scale },
