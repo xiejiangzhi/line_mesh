@@ -308,7 +308,7 @@ function DrawSet.default(pass)
       { 1, 0, 1, 1 },
     }
   })
-  pass:draw(gline1.mesh, { 0, 0, 0 })
+  pass:draw(gline1.mesh, vec3(0, 0, 0))
 
   local gline2 = LineMesh.gpu_build(pass, gpoints, 0.1, 16, {
     colors = {
@@ -321,7 +321,7 @@ function DrawSet.default(pass)
     },
     widths = { 0.2, 2, 2.5, 1.5, 1.0, 0.8 }
   })
-  pass:draw(gline2.mesh, { 0, 2, 0 })
+  pass:draw(gline2.mesh, vec3(0, 2, 0))
 end
 
 local function gen_points(dir, n)
