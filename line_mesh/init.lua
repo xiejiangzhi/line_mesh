@@ -263,11 +263,12 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
     local input_format = ComputeShader:getBufferFormat('InputBuffer')
     input_buffer = NewBuffer(input_format, #points)
     ret.input_buffer = input_buffer
+    ret.input_blob = lovr.data.newBlob(input_buffer:getSize())
   end
 
   ret.bfdata = BishopFrame.calc(points, ret.bfdata)
   local bfdata = ret.bfdata + 1
-  local input_ptr = ffi.cast('float*', input_buffer:mapData())
+  local input_ptr = ffi.cast('float*', ret.input_blob:getPointer())
   for i = 1, #points do
     local r = (widths and widths[i] or 1) * width * 0.5
     local color = colors and colors[i] or DefaultColor
@@ -296,12 +297,7 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
     --   color,
     -- }
   end
-  -- local input_buffer = ret.input_buffer
-  -- if not input_buffer or input_buffer:getLength() < #input_data then
-  --   input_buffer = NewBuffer(input_format, input_data)
-  -- else
-  --   input_buffer:setData(input_data)
-  -- end
+  input_buffer:setData(ret.input_blob)
 
   local mesh = ret.mesh
   local vcount = #points * segments
