@@ -297,7 +297,7 @@ function M.gpu_build(pass, _points, width, segments, opts, last_result)
     --   color,
     -- }
   end
-  input_buffer:setData(ret.input_blob)
+  input_buffer:setData(ret.input_blob, nil, nil, input_buffer:getStride() * #points)
 
   local mesh = ret.mesh
   local vcount = #points * segments
